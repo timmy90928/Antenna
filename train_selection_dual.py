@@ -11,15 +11,9 @@ from torch.autograd import Variable
 from torch.autograd import Function
 import matplotlib.pyplot as plt
 import torch.nn as nn
-import pandas as pd
 import numpy as np
-import time
-
 import torch
 import argparse
-
-import sys
-
 from antenna import *
 
 from antenna.models import (
@@ -32,10 +26,8 @@ from antenna.patch import (
 #%% Import By Device
 FloatTensor = torch.FloatTensor if str(config.device) == 'cpu' else torch.cuda.FloatTensor # type: ignore
 
-NAME = "" or str(int(time.time()))
 
-
-
+RESULT_PATH, is_connect_run = get_result_path("1751076848")
 
 # sys.excepthook = global_exception_handler
 
@@ -96,21 +88,17 @@ def parse_arg():
 
 #%%
 args = parse_arg()
-RESULT_PATH = Path(__file__).parent.joinpath("result", NAME)
-is_connect_run = RESULT_PATH.exists()
-RESULT_PATH.not_exist_create()
-
 path_pic = RESULT_PATH.joinpath("pic").not_exist_create()
 path_checkpoint = RESULT_PATH.joinpath("checkpoint").not_exist_create()
 
 TEMP = Record("temp", rootdir=RESULT_PATH, load=True)
 CONFIG_RECORD = json(RESULT_PATH.joinpath("Congig Record.json"))
 
-CONFIG_RECORD['Name'] = NAME
+CONFIG_RECORD['Name'] = RESULT_PATH.stem
 
 
 logger.add(
-    RESULT_PATH.joinpath(f"{NAME}.log"),
+    RESULT_PATH.joinpath(f"{RESULT_PATH.stem}.log"),
     format = "{time:YYYY-MM-DD HH:mm:ss} {level} {message}",
     level = "INFO",
 )
@@ -414,10 +402,10 @@ plt.grid(True)
 criterion2 = nn.SmoothL1Loss()
 # criterion2 = nn.MSELoss()
 
-
+last_epoch = TEMP('last_epoch', 0)
 # 訓練過程
 for epoch in range(args.MPGN_epoch):
-    epoch = epoch + TEMP('last_epoch', 0)
+    epoch = epoch + last_epoch
 
 
     
@@ -606,13 +594,13 @@ for epoch in range(args.MPGN_epoch):
         TEMP['output_element_buf'] = output_element_1
         # _TEMP["output_element_buf"] = output_element_buf # np.save(path_save_data.joinpath("output_element_buf.npy"), output_element_buf)
         if loss_real <= TEMP('min_loss', float('inf')):
-            min_loss = loss_real
+            min_loss = loss_real.item()
 
             de = TEMP('de', 0)
             count = TEMP('count', 0) + jump
             count += 1
         else:
-            min_loss = min_loss
+            min_loss = TEMP('min_loss', float('inf'))
             de = TEMP('de', 0) + 1
             count = TEMP('count', 0) + jump
             count += 1
@@ -625,7 +613,7 @@ for epoch in range(args.MPGN_epoch):
         TEMP['count'] = count
         TEMP['de'] = de     #  np.save(path_save_data.joinpath("de.npy"), de)
         TEMP['last_epoch'] = epoch
-        TEMP["min_loss"] = min_loss.item()    # np.save(path_save_data.joinpath("min_loss.npy"), min_loss.detach().numpy())
+        TEMP["min_loss"] = min_loss    # np.save(path_save_data.joinpath("min_loss.npy"), min_loss.detach().numpy())
 
         TEMP.save(f"{epoch} times")
         

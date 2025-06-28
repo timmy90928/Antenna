@@ -9,9 +9,21 @@ import matplotlib.pyplot as plt
 from loguru import logger #? pip3 install loguru
 
 import sys
+from time import time
 
 # __all__ = ["AntennaPattern", "AntennaResponse", "GradientEstimator", "SPGEN"]
 
+def get_result_path(name = None):
+    """
+    ```
+    RESULT_PATH, EXISTS = get_result_path()
+    NAME = RESULT_PATH.stem
+    ```
+    """
+    result_path = Path(__file__).parent.parent.joinpath("result", name or str(int(time())))
+    exists  = result_path.exists()
+    result_path.not_exist_create()
+    return result_path, exists
 
 def mult(_ob):
     _result = 1

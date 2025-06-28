@@ -37,17 +37,17 @@ pip freeze > requirements.txt
 檔案介紹
 -----------
 
-```bash
+```python
 Antenna
-├─ antenna  # 主套件
-｜  ├─ patch # microstrip patch antenna
-｜  ｜  └─ patch_simulator
-｜  ｜      ├─ sab # HFSS用
-｜  ｜      └─ ...
-｜  ├─ ris  # Reconfigurable Intelligent Surface (RIS)
-｜  ｜  └─ ...
-｜  └─ ...
-├─ script      # 腳本
-｜  └─ ...
-└─ result      # 執行後自動生成
+├─ antenna    # 主套件
+|  ├─ patch   # microstrip patch antenna
+|  |  └─ patch_simulator
+|  |      ├─ sab # HFSS用
+|  |      └─ ...
+|  ├─ ris    # Reconfigurable Intelligent Surface (RIS)
+|  |  └─ ...
+|  └─ ...
+├─ script     # 腳本
+|  └─ ...
+└─ result     # 執行後自動生成
 ```

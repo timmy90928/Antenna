@@ -202,31 +202,57 @@ class AntennaPattern:
     _history_datas:List[List[torch.Tensor]] = []
     _best_loss = float('inf')
     
-    def __init__(self, pattern:torch.Tensor, coordinate:Optional[List[Tuple[int,int, int, int]]] = None):
+    def __init__(self, pattern:torch.Tensor, coordinate:Optional[Tuple[int,int, int, int]] = None):
         """
         Example:
         ```
-        AntennaPattern.setCoordinate([(0, 25, 0, 25)])
+        AntennaPattern.setCoordinate((0, 25, 0, 25))
         ```
             
         """
-        self.input_tensor = torch.clamp(pattern.to(config.device), min=0.0, max=1.0)
-        coordinate = coordinate or getattr(self, '_antenna_pattern_coordinate')
-
-        self.coordinate:Union[List[Tuple[int,int, int, int]], List] = coordinate or []
-        self.num_patterns:int = len(self.coordinate)
-        self.num_pixel:int = 0
+        #* The core of this class.
         self.patterns:List[Tuple[torch.Tensor, int, int, int, int]] = [] # [(pattern, x1, x2, y1, y2), ...] >>> pattern is 2D
-        self.series:torch.Tensor = tensor([]) # concatenate: 1-dimensional array 1*n
-        """1*n array"""
         
-        _shape = self.input_tensor.shape
-        if self.dim() == 1:
-            self.series = self.input_tensor.reshape(1, _shape[0]) if len(_shape) == 1 else self.input_tensor[0]
+        if not hasattr(self, "_create_from_patterns"):
+            self.input_tensor = torch.clamp(pattern.to(config.device), min=0.0, max=1.0)
+            self.coordinate:Union[Tuple[int,int, int, int], Tuple] = coordinate or getattr(self, '_antenna_pattern_coordinate', None)
+
+            self._check_input()
+    
+    @classmethod
+    def create_from_patterns(cls, patterns:List[Tuple[torch.Tensor, int, int, int, int]]):
+        setattr(cls, '_create_from_patterns', True)
+        ap = cls(None)
+        ap.patterns = patterns
+        delattr(cls, '_create_from_patterns')
+        return ap
+    
+    def _check_input(self):
+        _dim = self.input_dim()
+        _c = self.coordinate
+        _input_tensor = self.input_tensor
+        
+        if not _c: raise ValueError(
+            'Please enter the `coordinate` parameter or use `setDefaultCoordinate()` to set the default value.'
+        )
+        if _dim == 1:
+            _input_tensor = _input_tensor.reshape((_c[1]-_c[0], _c[3]-_c[2]))
+        elif _dim == 2:
+            pass
         else:
-            self.series = self.input_tensor.reshape(1, mult(_shape))
-        self._add2patterns()
+            raise ValueError(f"Input pattern expected >1 dimension, but got {_dim} dimension")
         
+        self.patterns.append(
+            (
+                _input_tensor, _c[0], _c[1], _c[2], _c[3]
+            )
+        )
+        
+    @property
+    def series(self):
+        """One-dimensional array after merge."""
+        return self.merge().reshape(-1)
+    
     @classmethod
     def register_simulator(cls, simulator:Callable[[Tensor],Dict[str, Tensor]]):
         cls._simulator = simulator
@@ -236,15 +262,8 @@ class AntennaPattern:
         """
         TODO: 目前是取回所有的像素點，但實際上是取得大圖的像素點
         """
-        if hasattr(cls, '_antenna_pattern_coordinate'):
-            coordinates:List[Tuple[int, int, int, int]] = getattr(cls, '_antenna_pattern_coordinate')
-        else:
-            raise ValueError("No antenna pattern coordinate found, `AntennaPattern.setCoordinate()`")
-        _result = 0
-        for x1, x2, y1, y2 in coordinates:
-            _size = (x2 - x1, y2 - y1)
-            _result += mult(_size)
-        return _result
+        x1, x2, y1, y2 = getattr(cls, '_antenna_pattern_coordinate', (0,0,0,0))
+        return (x2-x1)*(y2-y1)
     
     @classmethod
     def getRandomPattern(cls, w=40, h=40):
@@ -254,20 +273,26 @@ class AntennaPattern:
             device=config.device
         )
         binaries = (patterns > 0.5).float()
-        return cls(binaries, [(0, w, 0, h)])
+        return cls(binaries, (0, w, 0, h))
 
+    def __str__(self):
+        _shape = self.merge().shape
+        return f"<AntennaPattern Pattern[{self.__len__()}] Shape[{_shape[0]}, {_shape[1]}] Size[{_shape.numel()}]>"
+    
     def __getitem__(self, key) -> "AntennaPattern":
         if key >= self.__len__():
             raise IndexError(f"Expected size {self.__len__()} but got size {key}")
         pattern, x1, x2, y1, y2 = self.patterns[key]
-        return AntennaPattern(pattern, [(x1, x2, y1, y2)])
+        return AntennaPattern(pattern, (x1, x2, y1, y2))
     
     def __add__(self, other):
         if isinstance(other, AntennaPattern):
-            _pattern = torch.cat([self.series, other.series], dim=1)
-            _coordinate = self.coordinate + other.coordinate
-            
-            return AntennaPattern(_pattern, _coordinate)
+            antenna_pattern = self.copy()
+            antenna_pattern.patterns = self.patterns + other.patterns
+            antenna_pattern.coordinate = None
+            antenna_pattern.input_tensor = None
+
+            return antenna_pattern
         else:
             raise TypeError("Unsupported operand type for +: 'AntennaPattern' and '{}'".format(type(other)))
     
@@ -278,47 +303,30 @@ class AntennaPattern:
         """Detach the response"""
         return self.series.detach().cpu()
     
-    def dim(self) -> int:
+    def input_dim(self) -> int:
+        if self.input_tensor is None:
+            raise RuntimeError("This function is not for multilayer boards.")
+        
         if len(self.input_tensor.shape) == 1 or self.input_tensor.shape[0] == 1:
             return 1
         else:
-            if self.num_patterns == 1:
-                return self.input_tensor.dim()
-            else:
-                raise ValueError("num_patterns > 1 but input_tensor is 1D")      
+            return self.input_tensor.dim()   
             
-    def copy(self, detach:bool = True):
-        if detach:
-            return AntennaPattern(self.input_tensor.detach().clone(), self.coordinate.copy())
-        else:
-            return AntennaPattern(self.input_tensor.clone(), self.coordinate.copy())
-    
-    def _add2patterns(self):
-        """
-        將 input_tensor 拆分成 self.patterns
-        - 如果 num_patterns == 1, 則直接將 input_tensor 作為一個 pattern
-        - 如果 num_patterns > 1, 則將 input_tensor 左右拆分成 num_patterns 個 pattern
-        """
-        _temp = self.series.clone()
-        for x1, x2, y1, y2 in self.coordinate:
-            _size = (x2 - x1, y2 - y1)
-            self.num_pixel += mult(_size)
-            pattern = _temp[0:mult(_size)].reshape(_size)
-            _temp = _temp[mult(_size):]
-            self.patterns.append((pattern, x1, x2, y1, y2))
+    def copy(self):
+        return self.create_from_patterns(self.patterns)
 
     @classmethod
-    def setCoordinate(cls, _coordinate:List[Tuple[int, int, int, int]]):
+    def setDefaultCoordinate(cls, _coordinate:Tuple[int, int, int, int]):
         """
         Coordinate Design.
 
         """
-        if not isinstance(_coordinate, list):
-            raise TypeError(f"Expected list, but got {type(_coordinate)}")
-        if not all(isinstance(i, tuple) for i in _coordinate):
-            raise TypeError(f"Expected list of tuple, but got {type(_coordinate)}")
-        if not all(len(i) == 4 for i in _coordinate):
+        if not isinstance(_coordinate, tuple):
+            raise TypeError(f"Expected tuple, but got {type(_coordinate)}")
+
+        if not len(_coordinate) == 4:
             raise ValueError(f"Expected tuple of length 4, but got {len(_coordinate)}")
+        
         setattr(cls, '_antenna_pattern_coordinate', _coordinate)
 
     def merge(self) -> torch.Tensor:
@@ -331,13 +339,16 @@ class AntennaPattern:
             raise ValueError("No patterns to merge")
 
         max_x = max(x2 for _, _, x2, _, _ in self.patterns)
+        min_x = min(x1 for _, x1, _, _, _ in self.patterns)
+        
         max_y = max(y2 for _, _, _, _, y2 in self.patterns)
-        base_pattern = torch.zeros((max_x, max_y), dtype=self.input_tensor.dtype)
-
+        min_y = min(y1 for _, _, _, y1, _ in self.patterns)
+        
+        base_pattern = torch.zeros((max_y, max_x))
         for pattern, x1, x2, y1, y2 in self.patterns:
-            base_pattern[x1:x2, y1:y2] = pattern  # 後面的 pattern 覆蓋前面的
+            base_pattern[y1:y2, x1:x2] = pattern  # 後面的 pattern 覆蓋前面的
 
-        return base_pattern.to(config.device)
+        return base_pattern.to(config.device)[min_y:max_y, min_x:max_x]
     
 
     def simulate(self, no_grad:bool = False, **param) -> dict[str, AntennaResponse]:

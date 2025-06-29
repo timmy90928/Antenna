@@ -416,6 +416,17 @@ class Config(dict):
     def setWarning(self, warning_type:str = "ignore"):
         return filterwarnings(warning_type) # type: ignore
     
+    def save(self, path):
+
+        self.update({key:str(value) for key, value in vars(self).items() })
+        with open(path,'w') as f:
+            _json_dump(self, f, indent = 4)
+    
+    def load(self, path):
+        # TODO
+        with open(path, 'r', encoding = 'utf-8') as f:
+            self.update(_json_load(f))
+    
 
 config = Config()
 
@@ -423,7 +434,7 @@ def tensor(data: Any,dtype= None, device=None, requires_grad: bool = False):
     return _tensor(data, dtype=dtype, device=device or config.device, requires_grad=requires_grad)
 
 class Figure:
-    def __init__(self, name:str, nrowcol:tuple = (1, 1), save:bool = False, show:bool = False, rootdir:Optional[str] = None, **kwargs):
+    def __init__(self, name:str, nrowcol:tuple = (1, 1), save:bool = False, show:bool = False, rootdir:Optional[str] = None, size = (18, 12), **kwargs):
         """
         ## Example
         ```
@@ -467,6 +478,7 @@ class Figure:
             fig.saveGIF(update, epochs, dpi=150)
         """
         fig = plt.figure(name, **kwargs)
+        fig.set_size_inches(*size)
         # fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
 
         self.fig = fig

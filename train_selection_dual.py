@@ -27,7 +27,7 @@ from antenna.patch import (
 FloatTensor = torch.FloatTensor if str(config.device) == 'cpu' else torch.cuda.FloatTensor # type: ignore
 
 
-RESULT_PATH, is_connect_run = get_result_path("1751076848")
+RESULT_PATH, is_connect_run = get_result_path('')
 
 sys.excepthook = global_exception_handler
 
@@ -96,7 +96,6 @@ CONFIG_RECORD = json(RESULT_PATH.joinpath("Congig Record.json"))
 
 CONFIG_RECORD['Name'] = RESULT_PATH.stem
 
-
 logger.add(
     RESULT_PATH.joinpath(f"{RESULT_PATH.stem}.log"),
     format = "{time:YYYY-MM-DD HH:mm:ss} {level} {message}",
@@ -104,10 +103,6 @@ logger.add(
 )
 logger.info(f"The results will be saved in {RESULT_PATH.absolute()} (Continue: {is_connect_run}, CUDA: {torch.cuda.is_available()})")
 
-# Save model every 10 epochs
-checkpoint_interval = 10
-
-    
     
 # %%
 # Return Loss
@@ -131,7 +126,7 @@ def train_HFSS_model(patch_pattern, HFSS_result, epoch:int, HFSS_model_name:Path
     # Train
     init_lr_2 = 0.0005
 
-    if epoch == 0:
+    if epoch == 1:
         HFSS_model = HFSSNet(num_classes=NUM_CLASSES)
     else:
         HFSS_model = HFSS_model_name.load_torch()
@@ -142,7 +137,6 @@ def train_HFSS_model(patch_pattern, HFSS_result, epoch:int, HFSS_model_name:Path
     inputs_2 = Variable(patch_pattern.type(FloatTensor))
     labels_2 = Variable(HFSS_result.type(FloatTensor))
 
-   
     HFSS_model.train()
 
     criterion = nn.MSELoss()
@@ -212,51 +206,11 @@ rd_lr_cnt = 0
 
 # sys.excepthook = global_exception_handler # Catch Global Error
 
-# %%
-
-# 創建一個 NumPy 陣列
-OnesBuffer_Index = []
-
-if pixel_row*pixel_column == 625:
-    
-    
-    #== Origin Mask ===
-    # # For port1
-    # for z0 in range(5):
-    #     for z1 in range(7):
-    #         OnesBuffer_Index.append(9+25*z0+z1)
-
-    # # For port2
-    # for z0 in range(5):
-    #     for z1 in range(7):
-    #         OnesBuffer_Index.append(509+25*z0+z1)
-    
-    
-    
-
-    OnesBuffer_Index = np.array(OnesBuffer_Index)
-
-    OnesBuffer = torch.zeros(625)
-
-
-    #== Circle Mask ===
-    OnesBuffer = OnesBuffer.reshape(25,25)
-    OnesBuffer[0] = 1
-    OnesBuffer[-1] = 1
-    OnesBuffer[:,0] = 1
-    OnesBuffer[:,-1] = 1
-    OnesBuffer = OnesBuffer.reshape(625)
-    
-    for z3 in range(625):
-        if z3 in OnesBuffer_Index:
-            OnesBuffer[z3] = 1.0
-            
-    plt.imshow(OnesBuffer.reshape(25,25))
-    OnesBuffer = torch.tensor(OnesBuffer)
-
 
 # %%
-AntennaPattern.setCoordinate([(0, 25, 0, 25)])
+AntennaPattern.setDefaultCoordinate((0, 25, 0, 25))
+upper = AntennaPattern(torch.ones((5, 5)), (10, 15, 0, 5))
+lower = AntennaPattern(torch.ones((5, 5)), (10, 15, 20, 25))
 
 model_name = ""
 pattern_table = (
@@ -315,14 +269,14 @@ pattern_table = (
 
 #%% 初始化神經網絡模型
 if is_connect_run:
-    last_model = path_checkpoint.joinpath(f"Antenna_Pattern_model_{TEMP('last_epoch')-1}.pth")
+    last_model = path_checkpoint.joinpath(f"Antenna_Pattern_model_{TEMP('epoch')-1}.pth")
     Antenna_checkpoint_loaded = last_model.load_torch()
     
     
     Antenna_Pattern_model = SPGEN(pattern_table, 25)
     Antenna_Pattern_model.load_state_dict(Antenna_checkpoint_loaded['state_dict'])
     
-    model_name = path_checkpoint.joinpath(f"GEN_model_{TEMP('last_epoch')-1}.pth")
+    model_name = path_checkpoint.joinpath(f"GEN_model_{TEMP('epoch')-1}.pth")
 else:
     # TEMP['last_epoch'] = 0
     # TEMP['min_loss'] = float('inf')
@@ -343,13 +297,6 @@ CONFIG_RECORD["GEN Model"] = str(Antenna_Pattern_model)
 CONFIG_RECORD["HFSS Simulator"] = str(simulator)
 
 
-# 生成模型輸入
-# model_input = np.append(returnloss_input, gain_input)
-# model_input = np.reshape(model_input, (1, 34))
-# model_input = torch.tensor(model_input)
-# model_input = Variable(model_input.type(FloatTensor))
-
-
 init_lr = args.MPGN_lr
 # Optimizer setting
 # optimizer_Antenna_Pattern = torch.optim.Adam(params=Antenna_Pattern_model.parameters(), lr=init_lr)
@@ -358,9 +305,6 @@ optimizer_Antenna_Pattern = torch.optim.Adam(params=Antenna_Pattern_model.parame
 
 if is_connect_run:
     optimizer_Antenna_Pattern.load_state_dict(Antenna_checkpoint_loaded['optimizer'])
-
-first_range = np.arange(5, 12)
-second_range = np.arange(22, 29)
 
 criterion = nn.MSELoss()
 
@@ -375,13 +319,6 @@ returnloss_lower = AntennaResponse.registerTargetResponse(-2.5, -50, (3, 4, 3, 4
 AntennaResponse.registerLossHook(custom_loss_r, label = "S11")
 AntennaResponse.registerLossHook(custom_loss_r, label = "S22")
 
-plt.plot(x, returnloss.detach().numpy(), color='red', marker="o")
-plt.plot(x, returnloss_upper, color='blue', marker="o")
-plt.plot(x, returnloss_lower, color='blue', marker="o")
-plt.grid(True)
-plt.ylim(-13, 1)
-# plt.show()
-
 # S21 -> low high low
 gain = AntennaResponse.registerTargetResponse(-19, 0, (3, 0, 11, 0, 3), label="S21")
 gain_upper = AntennaResponse.registerTargetResponse(-17, 0, (2, 3, 7, 3, 2), label="gain_upper")
@@ -389,11 +326,21 @@ gain_lower = AntennaResponse.registerTargetResponse(-22, -3, (4, 2, 5, 2, 4), la
 
 AntennaResponse.registerLossHook(custom_loss_g, label = "S21")
 
-plt.plot(x,gain.detach().numpy(), color='red', marker="o")
-plt.plot(x, gain_upper, color='blue', marker="o")
-plt.plot(x, gain_lower, color='blue', marker="o")
-plt.grid(True)
-# plt.show()
+with Figure('Target Response', (1, 2), rootdir=RESULT_PATH, save=True, size=(18*2, 9*2)) as fig:
+    fig.addAll()
+    
+    fig[0].set_title('S11 & S22')
+    fig[0].plot(x, returnloss.detach().numpy(), color='red', marker="o")
+    fig[0].plot(x, returnloss_upper, color='blue', marker="o")
+    fig[0].plot(x, returnloss_lower, color='blue', marker="o")
+    fig[0].grid(True)
+    # fig[0].set_ylim(-13, 1)
+    
+    fig[1].set_title('S21')
+    fig[1].plot(x,gain.detach().numpy(), color='red', marker="o")
+    fig[1].plot(x, gain_upper, color='blue', marker="o")
+    fig[1].plot(x, gain_lower, color='blue', marker="o")
+    fig[1].grid(True)
 
 
 
@@ -402,14 +349,12 @@ plt.grid(True)
 criterion2 = nn.SmoothL1Loss()
 # criterion2 = nn.MSELoss()
 
-last_epoch = TEMP('last_epoch', 0)
 # 訓練過程
-for epoch in range(args.MPGN_epoch):
-    epoch = epoch + last_epoch
+epoch = TEMP('epoch', 0)
+while epoch < args.MPGN_epoch + 1:
 
-
-    
-    TEMP.add('pt', 1, default=0)
+    epoch += 1
+    TEMP.add('pt', 1, default = 0)
 
     if (TEMP('pt', 0) % 15 == 0):
         simulator.reopen()
@@ -420,7 +365,7 @@ for epoch in range(args.MPGN_epoch):
 
     Antenna_Pattern_model.train()
 
-    logger.info(f"Start {epoch + 1} of {args.MPGN_epoch}")
+    logger.info(f"Start {epoch} of {args.MPGN_epoch}")
 
     # adjust_lr(optimizer_Antenna_Pattern, epoch, init_lr)
     optimizer_Antenna_Pattern.zero_grad()
@@ -432,11 +377,9 @@ for epoch in range(args.MPGN_epoch):
 
     output_element = Antenna_Pattern_model()
 
-    output_element = AntennaPattern(output_element.reshape(-1)) # + OnesBuffer
+    output_element = AntennaPattern(output_element.reshape(-1)) + upper + lower
 
-    # output_element = torch.clamp(output_element, min=0.0, max=1.0)
-
-    output_element_1 = (~output_element).numpy().reshape(-1)
+    output_element_1 = (~output_element).numpy()
 
     plt_element = output_element_1.reshape(pixel_column, pixel_row)
 
@@ -608,11 +551,11 @@ for epoch in range(args.MPGN_epoch):
         jump = 0
 
         exe_time = simulator.end()
-        logger.info(f"End {epoch+1} of {args.MPGN_epoch}, Loss: {loss_real:4f}, Time: {exe_time} s")
+        logger.info(f"End {epoch} of {args.MPGN_epoch}, Loss: {loss_real:4f}, Time: {exe_time} s")
 
         TEMP['count'] = count
         TEMP['de'] = de     #  np.save(path_save_data.joinpath("de.npy"), de)
-        TEMP['last_epoch'] = epoch
+        TEMP['epoch'] = epoch
         TEMP["min_loss"] = min_loss    # np.save(path_save_data.joinpath("min_loss.npy"), min_loss.detach().numpy())
 
         TEMP.save(f"{epoch} times")

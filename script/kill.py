@@ -5,13 +5,14 @@ from  psutil import (
     AccessDenied, 
     ZombieProcess
 )
+from loguru import logger
 
 def kill(process_name='ansysedt.exe'):
     for proc in process_iter(['pid', 'name']):
         if process_name.lower() in proc.info['name'].lower():
             try:
                 proc.kill()  # 結束進程
-                print(f"Process {process_name} terminated.")
+                logger.warning(f"Process {process_name} terminated.")
             except (NoSuchProcess, AccessDenied, ZombieProcess):
                 pass
 

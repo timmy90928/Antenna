@@ -3,6 +3,7 @@ from typing import (
     TypeVar, cast, Callable, Any, Optional, overload, Union, Sequence
 )
 from typing_extensions import Self
+from loguru import logger
 import traceback
 from torch import (
     __version__,
@@ -45,8 +46,9 @@ from datetime import datetime
 from shutil import rmtree as _rmtree
 
 #* Figure
+from matplotlib import rcParams
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
 from matplotlib.axes._axes import Axes  # type: ignore
 
 #* Email
@@ -417,10 +419,15 @@ class Config(dict):
         return filterwarnings(warning_type) # type: ignore
     
     def save(self, path):
-
-        self.update({key:str(value) for key, value in vars(self).items() })
+        _save = {}
+        self.update(vars(self))
+        for key, value in self.items():
+            if isinstance(value, (dict, list, tuple, str, int, float, bool)) or value is None:
+                _save[key] = value
+            else:
+                _save[key] = str(value)
         with open(path,'w') as f:
-            _json_dump(self, f, indent = 4)
+            _json_dump(_save, f, indent = 4)
     
     def load(self, path):
         # TODO
@@ -460,25 +467,28 @@ class Figure:
         ```
 
         ## 動畫
-        with Figure("asd", (1, 2)) as fig:
-            fig.fig.set_size_inches(9, 6)
+        ```
+        line = {}
+        epochs = 1500
+        line = np.random.random((epochs))
+            
+        with Figure("line", rootdir=r'./') as fig:
             fig.addAll()
-            loss_list = []
             def update(frame):
                 fig[0].clear()
-                fig[1].clear()
-                fig[0].set_title("Loss")
+                fig[0].set_title("line")
                 fig[0].set_xlim(0, epochs)
-                fig[0].set_ylim(0, 2.5)
-                loss_list.append(r["loss"][frame])
-                fig[0].plot(loss_list)
-                fig[1].set_title("Generated Pattern")
-                fig[1].imshow(r["output"][frame], cmap='gray')
+                fig[0].plot(line[:frame+1])
+
+                fig.fig.tight_layout(pad=0.1)
+                
                 return fig
-            fig.saveGIF(update, epochs, dpi=150)
+            fig.saveMP4(update, epochs, video_time=5)
+        ```
         """
         fig = plt.figure(name, **kwargs)
         fig.set_size_inches(*size)
+        fig.tight_layout(pad=0.1)
         # fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
 
         self.fig = fig
@@ -503,6 +513,67 @@ class Figure:
         ani = FuncAnimation(self.fig, update, frames=epochs)
         ani.save(f"{self.rootdir.joinpath(self.name)}.gif", writer=writer, dpi=dpi, progress_callback=lambda i, n: tqdm_iter.update())
     
+    def saveMP4(self, update:Callable[[int], "Figure"], epochs:int = 10, dpi = 150, video_time = None, del_temp = False):
+        from imageio_ffmpeg import get_ffmpeg_exe #? pip install imageio-ffmpeg
+        metadata = {
+            'title': f'{self.name}',
+            "artist": "WeiWen Wu",
+            'comment': "Provided by WeiWen's kit"
+        }
+        rcParams['animation.ffmpeg_path'] = get_ffmpeg_exe()
+        
+        path_video_temp = self.rootdir.joinpath('video_temp').not_exist_create()
+        path_merges:list[Path] = []
+        for n in trange(epochs, desc='Creating'):
+            self.fig.clear()
+            path_merges.append(
+                update(n).saveIMG(
+                    path_video_temp.joinpath(f'{n}.png')
+                )
+            )
+        def _update(frame):
+            plt.clf()
+            plt.imshow(
+                plt.imread(path_merges[frame])
+            )
+            plt.axis('off')
+            plt.tight_layout(pad=0)
+            return self
+            
+        fps = int(epochs/video_time) if video_time else 30
+        writer = FFMpegWriter(fps=max(1, min(fps, 120)), metadata=metadata) # , bitrate=1800
+        filename = self._ani_save(_update, epochs, writer, dpi)
+        writer.finish()
+        logger.info(f'Video creation completed. ({filename.absolute()}, fps: {fps})')
+        if del_temp: path_video_temp.rmtree()
+        
+    
+    def _ani_save(self, update: Callable[[int], Any], epochs, writer, dpi):
+        tqdm_iter = trange(epochs, desc="Plotting")
+        ani = FuncAnimation(self.fig, update, frames=epochs)
+        filename = self.rootdir.joinpath(f"{self.name}.mp4")
+        ani.save(
+            filename, writer=writer, dpi=dpi, 
+            progress_callback=lambda i, n: tqdm_iter.update(),
+        )
+        return filename
+        
+    
+    def saveIMG(self, path = None):
+        FIG_CONFIG = {
+            "format": 'png',
+            "bbox_inches": "tight",
+            "pad_inches": 0.1,
+            "dpi": 300,
+            "transparent": True,
+            "facecolor": "white", # white or none
+            "edgecolor": "white", # white or none
+        }
+        # self.fig.set_size_inches(18, 12)
+        path = path or self.rootdir.joinpath(f"{self.name}.png")
+        plt.savefig(path, **FIG_CONFIG) 
+        return path
+        
     def __getitem__(self, index:int) -> Axes:
         """
         Use first
@@ -519,22 +590,9 @@ class Figure:
         return self
 
     def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback):
-        FIG_CONFIG = {
-            "format": 'png',
-            "bbox_inches": "tight",
-            "pad_inches": 0.1,
-            "dpi": 300,
-            "transparent": True,
-            "facecolor": "white", # white or none
-            "edgecolor": "white", # white or none
-        }
-        
         if not exc_type:
             if self.show: plt.show()
-            if self.save: 
-                # self.fig.set_size_inches(18, 12)
-                plt.savefig(self.rootdir.joinpath(f"{self.name}.png"), **FIG_CONFIG)  
- 
+            if self.save: self.saveIMG()
         plt.close()
 
 class Record:

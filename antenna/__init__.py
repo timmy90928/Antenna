@@ -20,7 +20,7 @@ def get_result_path(name = None):
     NAME = RESULT_PATH.stem
     ```
     """
-    result_path = Path(__file__).parent.parent.joinpath("result", name or str(int(time())))
+    result_path = Path(__file__).parent.parent.joinpath("result", str(name) or str(int(time())))
     exists  = result_path.exists()
     result_path.not_exist_create()
     return result_path, exists
@@ -380,6 +380,7 @@ class AntennaPattern:
         ax:Axes = plt.axes(axes) # type: ignore
         ax.set_title("Antenna Pattern")
         ax.imshow(self.merge().cpu().detach(), cmap='viridis')
+        # ax.axis('off')
         if show: plt.show()
         return ax
     

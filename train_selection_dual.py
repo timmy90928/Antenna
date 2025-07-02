@@ -29,7 +29,7 @@ FloatTensor = torch.FloatTensor if str(config.device) == 'cpu' else torch.cuda.F
 
 RESULT_PATH, is_connect_run = get_result_path("1751076848")
 
-# sys.excepthook = global_exception_handler
+sys.excepthook = global_exception_handler
 
 #%% Config 
 

@@ -378,37 +378,51 @@ def plot(x,file_name:Optional[str] = None) -> None:
 
 class Config(dict):
     def __init__(self):
-        self.element_num = 40
         self.epochs = 10
-        self.incTH_deg , self.refTH_deg = -40 , 20 #先不要改
-        self.count = 0      # An integer count value
-        self.Main_lr = 1e-3 # Learning Rate For Main Training Loop
+        self.lr = 1e-3 # Learning Rate For Main Training Loop
+        self.element_num = 40
+        self['checkpoint_save_path'] = Path("./checkpoint")
+        self['device'] = _torch_device(type='cpu')
+    
+    def __getattr__(self, name):
+        # 該Class沒有此變數(name)會執行。
+        return self[name]
 
-        self._checkpoint_save_path = Path("./checkpoint")
-        
+    def __setattr__(self, name, value):
+        # 該Class沒有此變數(name)會執行。
+        self[name] = value
+
+    def check_keys(self, *keys:str, only_warning:bool = False ):
+        for key in keys:
+            if key not in self:
+                if only_warning:
+                    logger.warning(f'{key} not set.')
+                else:
+                    raise KeyError(f'{key} not set.')
     @property
     def device(self):
-        return _torch_device(type='cpu')
+        return self['device']
     
     @device.setter
     def device(self, device):
         device = device or _torch_device("cuda:0" if cuda.is_available() else "cpu")
         set_default_device(device)
         if device != "cpu":
-            cuda.set_device(self.device)
+            cuda.set_device(device)
+        self['device'] = device
     
     @property
-    def checkpoint_save_path(self):
+    def checkpoint_save_path(self) -> Path:
         """
         ```
         config.checkpoint_save_path.not_exist_create()
         ```
         """
-        return self._checkpoint_save_path.absolute()
+        return self['checkpoint_save_path'].absolute()
         
     @checkpoint_save_path.setter
     def checkpoint_save_path(self, path):
-        self._checkpoint_save_path = Path(path)
+        self['checkpoint_save_path'] = Path(path)
 
     def setRandomSeeds(self, seed = 0):
         _manual_seed(seed)
@@ -418,7 +432,15 @@ class Config(dict):
     def setWarning(self, warning_type:str = "ignore"):
         return filterwarnings(warning_type) # type: ignore
     
-    def save(self, path):
+    def save(self, name:str = 'config', rootdir:Optional[str] = None):
+        """
+        Only save the following types
+        ```
+        dict, list, tuple, str, int, float, bool, None
+        ```
+        If it is other, it will be automatically converted to a string using `str()`
+        """
+        path = Path(rootdir or "./", f"{name}.json")
         _save = {}
         self.update(vars(self))
         for key, value in self.items():
@@ -429,11 +451,21 @@ class Config(dict):
         with open(path,'w') as f:
             _json_dump(_save, f, indent = 4)
     
-    def load(self, path):
+    def load(self, name:str = 'config', rootdir:Optional[str] = None):
+        """
+        Only load the following types
+        ```
+        dict, list, tuple, str, int, float, bool, None
+        ```
+        """
         # TODO
+        path = Path(rootdir or "./", f"{name}.json")
         with open(path, 'r', encoding = 'utf-8') as f:
             self.update(_json_load(f))
     
+    def __str__(self):
+        _str = ", ".join(f"{k}={v}" for k, v in self.items())
+        return f"{self.__class__.__name__}({_str})"
 
 config = Config()
 
@@ -497,7 +529,10 @@ class Figure:
         self.name = name
         self.nrowcol = nrowcol    
         self.rootdir = Path(rootdir or "./")
-        
+    
+    def __repr__(self):
+        return f"{self.__class__.__name__}(name={self.name}, nrowcol={self.nrowcol}, save={self.save}, show={self.show}, rootdir={self.rootdir.absolute()}, size={self.fig.get_size_inches()})"
+
 
     def index(self, index:int = 1):
         ax = self.fig.add_subplot(self.nrowcol[0], self.nrowcol[1], index)

@@ -77,10 +77,13 @@ class sign_f(Function):
 
 class HFSSNet(nn.Module):
 
-    def __init__(self, num_classes):
+    def __init__(self, num_pattern_pixel = 625, num_response:tuple = (3, 17)):
         super(HFSSNet, self).__init__()
+        self.num_response = num_response
+        self.num_pattern_pixel = num_pattern_pixel
+
         self.fc_patch = nn.Sequential(
-            nn.Linear(625, 2048),
+            nn.Linear(num_pattern_pixel, 2048),
             nn.PReLU(),
             nn.Linear(2048, 1024),
             nn.PReLU(),
@@ -90,12 +93,15 @@ class HFSSNet(nn.Module):
             nn.PReLU(),
             nn.Linear(128, 64),
             nn.PReLU(),
-            nn.Linear(64, 51)
+            nn.Linear(64, num_response[0]*num_response[1])
         )
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}(num_pattern_pixel={self.num_pattern_pixel}, num_response={self.num_response}"
+    
     def forward(self, input):
         x = self.fc_patch(input)
-        x = x.reshape(-1, 3, 17)
+        x = x.reshape(self.num_response)
         return x
     
 
@@ -118,7 +124,7 @@ class SPGEN(nn.Module):
 
 
     def __str__(self):
-        return f"<SPGEN total[{self.patern_size*self.grid_size}(small[{self.patern_size}]xbig[{self.grid_size}])]>"
+        return f"SPGEN(total={self.patern_size*self.grid_size}(small[{self.patern_size}]xbig[{self.grid_size}))"
     
     def _to_tensor(self):
         """

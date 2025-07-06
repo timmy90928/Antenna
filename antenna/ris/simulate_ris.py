@@ -16,6 +16,7 @@ class RISSimulator:
         self.pre_calAF = self._calAF()
 
     def _calAF(self):
+        """Calculate Array Factor"""
         c = 3e8  # 光速
         f = 28e9 #頻率
         lamda = c / f
@@ -31,6 +32,7 @@ class RISSimulator:
         phiDeg = [i for i in range(0,361,2)]
 
         incPH_deg , refPH_deg = 90 , 0
+        incTH_deg , refTH_deg = -40 , 20 #先不要改
 
         theta = deg2rad(theDeg)
         phi   = deg2rad(phiDeg)
@@ -41,7 +43,7 @@ class RISSimulator:
         u = np_round(((sin(THETA)) * (cos(PHI))) , decimals = 4)
         v = np_round(((sin(THETA)) * (sin(PHI))) , decimals = 4)
 
-        incTH_rad, incPH_rad = deg2rad([config.incTH_deg, incPH_deg])
+        incTH_rad, incPH_rad = deg2rad([incTH_deg, incPH_deg])
 
         low_bound_X = -(element_num / 2 - 0.5)
         high_bound_X = low_bound_X + element_num
@@ -108,4 +110,4 @@ class RISSimulator:
         mag = torch.clamp(mag, min=1e-8) # avoid log(0)
         dB_AF = 20 * torch.log10(AF / mag)
 
-        return dB_AF[0]
+        return {'response': dB_AF[0]}

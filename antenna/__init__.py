@@ -13,16 +13,22 @@ from time import time
 
 # __all__ = ["AntennaPattern", "AntennaResponse", "GradientEstimator", "SPGEN"]
 
-def get_result_path(name = None):
+def get_result_path(name = None, *, set_logger:bool = True):
     """
     ```
     RESULT_PATH, EXISTS = get_result_path()
     NAME = RESULT_PATH.stem
     ```
     """
-    result_path = Path(__file__).parent.parent.joinpath("result", str(name) or str(int(time())))
+    result_path = Path(__file__).parent.parent.joinpath("result", str(name or int(time())))
     exists  = result_path.exists()
     result_path.not_exist_create()
+
+    logger.add(
+        result_path.joinpath(f"{result_path.stem}.log"),
+        format = "{time:YYYY-MM-DD HH:mm:ss} {level} {message}",
+        level = "INFO",
+    )
     return result_path, exists
 
 def mult(_ob):
@@ -36,6 +42,8 @@ class AntennaResponse:
     Antenna Response Design.
 
     """
+    x_patch_n257 = np.linspace(24, 32, 17) #? 26.5 - 28 - 29.5
+    x_ris = np.linspace(0, 360, 361)
     _target_response = {}
     _loss_fn_hook = {}
     def __init__(self, response:Tensor):
@@ -171,7 +179,7 @@ class AntennaResponse:
         return expected_response
 
     @classmethod
-    def getTargetResponse(cls, label:str = "response"):
+    def getTargetResponse(cls, label:str = "response") -> Tensor:
         """
         Target Response Design.
 

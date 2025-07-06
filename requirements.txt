@@ -24,11 +24,11 @@ pyparsing==3.0.9
 python-dateutil==2.9.0.post0
 pytz==2025.1
 pywin32==308
--e git+https://github.com/lessw2020/Ranger-Deep-Learning-Optimizer.git@c82a30460684c7301086d84185a1927b1c256afa#egg=ranger
+# -e git+https://github.com/lessw2020/Ranger-Deep-Learning-Optimizer.git@c82a30460684c7301086d84185a1927b1c256afa#egg=ranger
 six==1.17.0
 sympy==1.13.3
 tbb==2021.13.1
-torch==2.3.0
+# torch==2.3.0
 tqdm==4.67.1
 typing_extensions==4.12.2
 tzdata==2025.1

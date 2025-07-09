@@ -15,7 +15,7 @@ def custom_loss_r(prediciton, target, loss_type='SmoothL1Loss'):
     mask_b_25 = prediciton[mask_25] < high_response
     
     if mask_b_25.sum()==0:
-        loss_25 = torch.tensor(0.0, dtype=torch.float32)
+        loss_25 = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
     else:
         loss_25 = criterion_r(prediciton[mask_25][mask_b_25], target[mask_25][mask_b_25])
         
@@ -23,7 +23,7 @@ def custom_loss_r(prediciton, target, loss_type='SmoothL1Loss'):
     mask_b_10 = prediciton[mask_10] > low_response
     
     if mask_b_10.sum()==0:
-        loss_10 = torch.tensor(0.0, dtype=torch.float32)
+        loss_10 = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
     else:
         loss_10 = criterion_r(prediciton[mask_10][mask_b_10], target[mask_10][mask_b_10])
     
@@ -41,7 +41,7 @@ def custom_loss_g(prediciton, target, loss_type='SmoothL1Loss'):
     mask_b_10 = prediciton[mask_10] > low_gain
     
     if mask_b_10.sum()==0:
-        loss_10 = torch.tensor(0.0, dtype=torch.float32)
+        loss_10 = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
     else:
         loss_10 = criterion_g(prediciton[mask_10][mask_b_10], target[mask_10][mask_b_10])
         
@@ -49,7 +49,7 @@ def custom_loss_g(prediciton, target, loss_type='SmoothL1Loss'):
     mask_b_4 = prediciton[mask_4] < high_gain
     
     if mask_b_4.sum()==0:
-        loss_4 = torch.tensor(0.0, dtype=torch.float32)
+        loss_4 = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
     else:
         loss_4 = criterion_g(prediciton[mask_4][mask_b_4], target[mask_4][mask_b_4])
     

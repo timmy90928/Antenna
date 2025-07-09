@@ -37,13 +37,15 @@ class SurrogateModel(ABC):
         self.optimizer: Optimizer = optimizer
         self.progress_callback = progress_callback
 
-    def save(self, path):
-        path = Path(path).joinpath(f"sm_{self.epoch}.pth")
+    def save(self, rootdir):
+        # path = Path(rootdir).joinpath(f"sm_{self.epoch}.pth")
+        path = Path(rootdir).joinpath(f"sm.pth")
         torch.save(self.model, path)
         return path
 
-    def load(self, path):
-        self.model = Path(path).load_torch()
+    def load(self, rootdir):
+        path = Path(rootdir).joinpath(f"sm.pth")
+        self.model = path.load_torch()
 
     def __call__(self, pattern):
         self.epoch += 1
@@ -58,7 +60,7 @@ class SurrogateModel(ABC):
 class SpecialSM(SurrogateModel):
     def __init__(self):
         model_ge = HFSSNet( # Pattern -> Response
-            1600, config.response_size
+            AntennaPattern.getAllPixel(), config.response_size
         )
         criterion_ge = nn.MSELoss()
         optimizer_ge = Ranger(
@@ -70,17 +72,35 @@ class SpecialSM(SurrogateModel):
         super().__init__(model_ge, criterion_ge, optimizer_ge)
 
     def train(self, pattern):
+        self.model.train()
+        pattern = tensor(pattern)
         sm_loss = []
         for epoch_ge in range(500):
             self.progress_callback(epoch_ge, 500)
             self.optimizer.zero_grad()
 
-            response = AntennaResponse(self.model(pattern))
-            loss_ge:Tensor = response.criterion()
-            sm_loss.append(loss_ge.item())
+            response = self.model(pattern)
 
-            loss_ge.backward(retain_graph=True)
+            match pattern.size(0):
+                case 625: #? 25*25
+                    s11 = AntennaResponse(response[0])
+                    s21 = AntennaResponse(response[1])
+                    s22 = AntennaResponse(response[2])
+
+                    loss_s11 = s11.criterion('S11')
+                    loss_s21 = s21.criterion('S21')
+                    loss_s22 = s22.criterion('S22')
+                    
+                    loss_ge:Tensor = loss_s11 + loss_s21 + loss_s22
+                case 1600: #? 40*40
+                    loss_ge:Tensor = AntennaResponse(response).criterion()
+                case _:
+                    raise ValueError(f'No matching settings found for {pattern.size(0)}')
+                
+            loss_ge.backward()
             self.optimizer.step()
             self.scheduler_ge.step(loss_ge.item())
+            sm_loss.append(loss_ge.item())
+
         return sm_loss
 

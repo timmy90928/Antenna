@@ -118,4 +118,4 @@ class PatchSimulator(ABC):
         pass
 
     def __str__(self):
-        return f"<{self.__class__.__name__} SAB[{self.HFSS_sab_path}]>"
+        return f"{self.__class__.__name__}(HFSS_sab_path={self.HFSS_sab_path})"

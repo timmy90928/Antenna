@@ -1,6 +1,7 @@
 from ..utils import *
 from .patch_simulator import  com_error
 from .patch_simulator.dual_port import DualPortSimulator
+from .patch_simulator.single_port import SinglePortSimulator
 
 import torch
 

@@ -60,6 +60,8 @@ class AntennaResponse:
             TypeError: If the response is not a tensor.
         
         """
+        if isinstance(response, AntennaResponse):
+            return response
         if not isinstance(response, Tensor):
             raise TypeError("Expected Tensor, but got {}".format(type(response)))
         response = response.to(config.device)
@@ -218,6 +220,9 @@ class AntennaPattern:
         ```
             
         """
+        if isinstance(pattern, AntennaPattern):
+            return pattern
+        
         #* The core of this class.
         self.patterns:List[Tuple[torch.Tensor, int, int, int, int]] = [] # [(pattern, x1, x2, y1, y2), ...] >>> pattern is 2D
         

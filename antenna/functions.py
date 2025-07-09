@@ -79,8 +79,8 @@ class SpecialSM(SurrogateModel):
             self.progress_callback(epoch_ge, 500)
             self.optimizer.zero_grad()
 
-            response = self.model(pattern)
-
+            response = AntennaResponse(self.model(pattern))
+            
             match pattern.size(0):
                 case 625: #? 25*25
                     s11 = AntennaResponse(response[0])
@@ -104,3 +104,50 @@ class SpecialSM(SurrogateModel):
 
         return sm_loss
 
+class OldSM(SurrogateModel):
+    def __init__(self):
+        model_ge = HFSSNet( # Pattern -> Response
+            1600, config.response_size
+        )
+        criterion_ge = nn.MSELoss()
+        optimizer_ge = Ranger(
+            params=model_ge.parameters(), lr=config.lr
+        )
+        self.scheduler_ge = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer_ge, mode="min", factor=0.5, patience=10, min_lr=1e-6
+        )
+        super().__init__(model_ge, criterion_ge, optimizer_ge)
+
+    def train(self, pattern:Tensor, real_response:Tensor):
+        self.model.train()
+        pilotLoss_2 = []
+        self.loss = float('inf')
+        epoch_2 = 0
+        
+        input = tensor(pattern,  requires_grad=True)
+        label = tensor(real_response,  requires_grad=True)
+        # for epoch in range(num_epochs):
+        while self.loss > 0.00005 and epoch_2 < 2000:
+            
+            self.optimizer.zero_grad()
+
+            outputs_result:Tensor = self.model(input)
+
+            loss_R:Tensor = self.criterion(
+                outputs_result.reshape(-1, *config.response_size),
+                label.reshape(-1, *config.response_size)
+            )
+
+            loss_R.backward()
+            self.optimizer.step()
+
+            pilotLoss_2.append(loss_R.item())
+            self.loss = loss_R.item()
+            self.progress_callback(epoch_2, 2000)
+
+            epoch_2 = epoch_2 + 1
+
+        return pilotLoss_2
+
+
+HFSS_model = Path(r"C:\timmy\Program\Antenna\model.pt").load_torch()

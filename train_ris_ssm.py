@@ -131,6 +131,15 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
 # tqdm_ge = trange(500)
 ssm = SpecialSM()
 
+if is_connect_run:
+    last_model = path_checkpoint.joinpath(f"Antenna_Pattern_model_{TEMP('epoch')-1}.pth")
+    Antenna_checkpoint_loaded = last_model.load_torch()
+    model.load_state_dict(Antenna_checkpoint_loaded['state_dict'])
+    optimizer.load_state_dict(Antenna_checkpoint_loaded['optimizer'])
+    ssm.load(config.checkpoint_save_path)
+    model_name = path_checkpoint.joinpath(f"GEN_model_{TEMP('epoch')-1}.pth")
+    
+config['HFSS Simulator'] = simulator
 config['Generator'] = model
 config['optimizer'] = optimizer
 config['SurrogateModel'] = ssm

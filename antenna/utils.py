@@ -1,6 +1,6 @@
 from typing import (
     Tuple, List, Dict, Deque, # Can use the built-in.
-    TypeVar, cast, Callable, Any, Optional, overload, Union, Sequence
+    TypeVar, cast, Callable, Any, Optional, overload, Union, Sequence, Literal
 )
 from typing_extensions import Self
 from loguru import logger

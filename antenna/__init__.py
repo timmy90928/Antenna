@@ -45,6 +45,7 @@ class AntennaResponse:
     x_patch_n257 = np.linspace(24, 32, 17) #? 26.5 - 28 - 29.5
     x_ris = np.linspace(0, 360, 361)
     _target_response = {}
+    _target_response_str = {}
     _loss_fn_hook = {}
     def __init__(self, response:Tensor):
         """
@@ -61,7 +62,7 @@ class AntennaResponse:
         
         """
         if isinstance(response, AntennaResponse):
-            return response
+            response = response.response
         if not isinstance(response, Tensor):
             raise TypeError("Expected Tensor, but got {}".format(type(response)))
         response = response.to(config.device)
@@ -82,48 +83,7 @@ class AntennaResponse:
         _v = self.response.reshape(1, self.response.shape[0])
         _v.requires_grad_(True)
         return _v
-    
-    @property
-    def loss(self) -> LossFunction:
-        if not hasattr(self, '_loss'):
-            self._loss = LossFunction(self.lossResponse, label="Response Loss")
-        return self._loss
-    
-    def lossResponse(self):
-        target = self.getTargetResponse().vertical  # [361]
-        prediction = self.vertical  # [361]
 
-        # 基本條件
-        mask_20 = target == -20
-        mask_b_20 = prediction[mask_20] > -20
-
-        mask_0 = target == 0
-        mask_s_0 = prediction[mask_0] < -3
-
-        # 為了確保有梯度，設定條件不滿足時也會計入一個 dummy loss
-        if mask_b_20.sum() > 0:
-            loss_20 = F.smooth_l1_loss(
-                prediction[mask_20][mask_b_20],
-                target[mask_20][mask_b_20]
-            )
-        else:
-            # 使用全體 prediction 的一小部分作 dummy loss，保證梯度
-            loss_20 = 0.01 * F.mse_loss(prediction, target)
-
-        if mask_s_0.sum() > 0:
-            loss_0 = F.smooth_l1_loss(
-                prediction[mask_0][mask_s_0],
-                target[mask_0][mask_s_0]
-            )
-        else:
-            loss_0 = 0.01 * F.mse_loss(prediction, target)
-
-        loss = loss_20 + loss_0
-
-        return loss
-
-    
-    
     def plot(self, label, axes:Optional[Axes] = None, show:bool = False):
         ax:Axes = plt.axes(axes) # type: ignore
         ax.set_title(f'Antenna Response')
@@ -132,24 +92,42 @@ class AntennaResponse:
         ax.legend()
         if show: plt.show()
         return ax
-    
-    # @classmethod
-    # def setTargetResponse(cls, _min:int, _width:Tuple[int,int,int,int,int], label:Optional[str] = None) -> "AntennaResponse":
-    #     """
-    #     Target Response Design.
 
-    #     :param _min: The lowest point of response
-    #     :param _width: 
+    @classmethod
+    def registerLabels(cls, *labels:str, x:Union[tuple[int, int, int], Literal['ris', 'n257']] = 'ris') -> Tensor:
+        """
+        :param x: (start, stop, total)
+        """
+        match x:
+            case 'ris':
+                x = (0, 360, 361)
+            case 'n257': #? 26.5 - 28 - 29.5
+                x = (24, 32, 17) 
+            case _:
+                pass
 
-    #     :return: AntennaResponse
+        cls.labels = labels
+        cls._x = x
+
+    @classmethod
+    def x(cls):
+        if not hasattr(cls, 'x'):
+            RuntimeError("No x registered. Please use `registerLabels()` first.")
+        return np.linspace(*cls._x)
+
+    @classmethod
+    def size(cls, flatten:bool = False):
+        """The number of labels used to calculate loss and the number of points in their labels."""
+        if not hasattr(cls, 'labels'):
+            RuntimeError("No labels registered. Please use `registerLabels()` first.")
+        _ = (len(cls.labels), cls._x[2])
+        return _[0] * _[1] if flatten else _
         
-    #     """
-    #     if len(_width) != 5:
-    #         raise ValueError(f"Expected 5 width, but got {len(_width)}")
-    #     setattr(cls, '_target_response_min', _min)
-    #     setattr(cls, '_target_response_width', _width)
-
-    #     return cls.getTargetResponse()
+    
+    @classmethod
+    def to_str(cls):
+        target_respons_str = " ".join([f"{k}({v})" for k, v in cls._target_response_str.items()])
+        return f"AntennaResponse(labels={cls.labels}, size={cls.size()}, x={cls._x}, target={target_respons_str})"
     
     @classmethod
     def registerTargetResponse(cls, side:float, center:float, width:Tuple[int,int,int,int,int], label:str = "response") -> Tensor:
@@ -176,6 +154,7 @@ class AntennaResponse:
 
         if label:
             cls._target_response[label] = expected_response
+            cls._target_response_str[label] = f"side={side}, center={center}, width={width}"
         
 
         return expected_response
@@ -189,7 +168,9 @@ class AntennaResponse:
 
         """
         if label not in cls._target_response.keys():
-            raise RuntimeError(f"The {label} of TargetResponse is not registered. Please use `registerTargetResponse()` first.")
+            raise RuntimeError(
+                f"The {label} of TargetResponse is not registered. Please use `registerTargetResponse()` first."
+            )
         return cls._target_response[label]
     
     @classmethod
@@ -208,6 +189,21 @@ class AntennaResponse:
             self.response, self.getTargetResponse(label), **param
         )
     
+    @classmethod
+    def multi_responses_to_loss(cls, responses:Union[dict[str, Any], Tensor]):
+        if isinstance(responses, Tensor): 
+            responses_tensor = responses.reshape(cls.size())
+
+            responses = {}
+            for label, res in zip(cls.labels, responses_tensor):
+                responses[label] = res
+
+
+        loss = tensor(0.0, requires_grad=True)
+        for key, value in responses.items():
+            loss = loss + cls(value).criterion(key)
+        return loss
+    
 class AntennaPattern:
     _history_datas:List[List[torch.Tensor]] = []
     _best_loss = float('inf')
@@ -220,18 +216,20 @@ class AntennaPattern:
         ```
             
         """
-        if isinstance(pattern, AntennaPattern):
-            return pattern
-        
         #* The core of this class.
         self.patterns:List[Tuple[torch.Tensor, int, int, int, int]] = [] # [(pattern, x1, x2, y1, y2), ...] >>> pattern is 2D
         
+        
+        
         if not hasattr(self, "_create_from_patterns"):
-            self.input_tensor = torch.clamp(pattern.to(config.device), min=0.0, max=1.0)
-            self.coordinate:Union[Tuple[int,int, int, int], Tuple] = coordinate or getattr(self, '_antenna_pattern_coordinate', None)
+            if isinstance(pattern, AntennaPattern):
+                self.patterns = pattern.patterns
+            else:
+                self.input_tensor = torch.clamp(pattern.to(config.device), min=0.0, max=1.0)
+                self.coordinate:Union[Tuple[int,int, int, int], Tuple] = coordinate or getattr(self, '_antenna_pattern_coordinate', None)
 
-            self._check_input()
-    
+                self._check_input()
+
     @classmethod
     def create_from_patterns(cls, patterns:List[Tuple[torch.Tensor, int, int, int, int]]):
         setattr(cls, '_create_from_patterns', True)
@@ -290,7 +288,7 @@ class AntennaPattern:
 
     def __str__(self):
         _shape = self.merge().shape
-        return f"<AntennaPattern Pattern[{self.__len__()}] Shape[{_shape[0]}, {_shape[1]}] Size[{_shape.numel()}]>"
+        return f"AntennaPattern(Pattern_num={self.__len__()} Shape=[{_shape[0]}, {_shape[1]}] Size=[{_shape.numel()}])"
     
     def __getitem__(self, key) -> "AntennaPattern":
         if key >= self.__len__():

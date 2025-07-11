@@ -60,7 +60,7 @@ class SurrogateModel(ABC):
 class SpecialSM(SurrogateModel):
     def __init__(self):
         model_ge = HFSSNet( # Pattern -> Response
-            AntennaPattern.getAllPixel(), config.response_size
+            AntennaPattern.getAllPixel(), AntennaResponse.size()
         )
         criterion_ge = nn.MSELoss()
         optimizer_ge = Ranger(
@@ -79,7 +79,7 @@ class SpecialSM(SurrogateModel):
             self.progress_callback(epoch_ge, 500)
             self.optimizer.zero_grad()
 
-            response = AntennaResponse(self.model(pattern))
+            response = self.model(pattern)
             
             match pattern.size(0):
                 case 625: #? 25*25
@@ -107,7 +107,7 @@ class SpecialSM(SurrogateModel):
 class OldSM(SurrogateModel):
     def __init__(self):
         model_ge = HFSSNet( # Pattern -> Response
-            1600, config.response_size
+            AntennaPattern.getAllPixel(), AntennaResponse.size()
         )
         criterion_ge = nn.MSELoss()
         optimizer_ge = Ranger(
@@ -134,8 +134,8 @@ class OldSM(SurrogateModel):
             outputs_result:Tensor = self.model(input)
 
             loss_R:Tensor = self.criterion(
-                outputs_result.reshape(-1, *config.response_size),
-                label.reshape(-1, *config.response_size)
+                outputs_result.reshape(-1, *AntennaResponse.size()),
+                label.reshape(-1, *AntennaResponse.size())
             )
 
             loss_R.backward()
@@ -149,78 +149,3 @@ class OldSM(SurrogateModel):
 
         return pilotLoss_2
 
-
-
-def train_HFSS_model(patch_pattern, HFSS_result, epoch:int, HFSS_model_name:Path):
-
-    NUM_CLASSES = 3*17
-
-    # Train
-    config.check_keys('HFSS.lr', 'response_size')
-    config.check_keys('HFSS.min_loss', 'HFSS.max_epoch', only_warning=True)
-
-    # if epoch == 1:
-    #     # HFSS_model = HFSSNet(AntennaPattern.getAllPixel(), config.response_size)
-    #     HFSS_model = Path(r"C:\timmy\Program\Antenna\model.pt").load_torch()
-    # else:
-    #     # HFSS_model = HFSS_model_name.load_torch()
-    #     pass
-
-    patch_pattern = torch.tensor(patch_pattern)
-    HFSS_result = torch.tensor(HFSS_result)
-
-    inputs_2 = Variable(patch_pattern.type(FloatTensor))
-    labels_2 = Variable(HFSS_result.type(FloatTensor))
-
-    HFSS_model.train()
-
-    criterion = nn.MSELoss()
-    
-
-    # Optimizer setting
-    optimizer_HFSS = torch.optim.Adam(
-        params=HFSS_model.parameters(), lr=config['HFSS.lr']
-    )
-
-    flag_correct = True
-
-    pilotLoss_2 = []
-
-    # HFSS_model_name = ""
-
-    epoch_2 = 0
-
-    
-    # for epoch in range(num_epochs):
-    while (flag_correct):
-        HFSS_model.train()
-        
-        training_loss_2 = 0.0
-        
-        optimizer_HFSS.zero_grad()
-
-        outputs_result = HFSS_model(inputs_2)
-
-        loss_R:Tensor = criterion(outputs_result.reshape(-1, *config.response_size),labels_2.reshape(-1, *config.response_size))
-
-        loss_R.backward()
-        optimizer_HFSS.step()
-
-        training_loss_2 += float(loss_R.item() * inputs_2.size(0))
-
-        pilotLoss_2.append(loss_R.detach().numpy())
-
-        HFSS_model.eval()
-
-        if loss_R < 0.00005 or epoch_2 == 2000:
-            
-            HFSS_model_name = config.checkpoint_save_path.joinpath(f"GEN_model_{epoch}.pth")
-            # torch.save(HFSS_model, HFSS_model_name)
-            flag_correct = False
-            plt.plot(pilotLoss_2)
-            # plt.show()
-            break
-
-        epoch_2 = epoch_2 + 1
-
-    return HFSS_model_name, pilotLoss_2

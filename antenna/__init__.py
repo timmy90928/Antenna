@@ -114,7 +114,7 @@ class AntennaResponse:
     @classmethod
     def x(cls):
         """Get the x-axis value of this response."""
-        if not hasattr(cls, 'x'):
+        if not hasattr(cls, '_x'):
             RuntimeError("No x registered. Please use `registerLabels()` first.")
         return np.linspace(*cls._x)
 
@@ -208,6 +208,20 @@ class AntennaResponse:
             loss = loss + cls(value).criterion(key)
         return loss
     
+    @classmethod
+    def merge_target_responses(cls):
+        if not hasattr(cls, 'labels'):
+            raise RuntimeError(
+                "No labels registered. Please use `registerLabels()` first."
+            )
+        _result_list = []
+        for label in cls.labels:
+            _result_list.append(cls.getTargetResponse(label))
+        _result = concat(_result_list)
+        if _result.size(0) != cls.size(flatten = True):
+            raise 
+        return _result
+
 class AntennaPattern:
     _history_datas:List[List[torch.Tensor]] = []
     _best_loss = float('inf')
@@ -279,6 +293,15 @@ class AntennaPattern:
         """
         x1, x2, y1, y2 = getattr(cls, '_antenna_pattern_coordinate', (0,0,0,0))
         return (x2-x1)*(y2-y1)
+    
+    @classmethod
+    def size(cls, flatten:bool = False):
+        """The number of labels used to calculate loss and the number of points in their labels."""
+        if not hasattr(cls, '_antenna_pattern_coordinate'):
+            raise RuntimeError("Please use `setDefaultCoordinate()` first.")
+        x1, x2, y1, y2 = getattr(cls, '_antenna_pattern_coordinate')
+
+        return (x2-x1)*(y2-y1) if flatten else ((x2-x1), (y2-y1))
     
     @classmethod
     def getRandomPattern(cls, w=40, h=40):

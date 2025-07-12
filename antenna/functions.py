@@ -1,153 +1,63 @@
-from antenna.utils import *
-from antenna.models import *
-from antenna.ranger import Ranger
-from antenna import *
+import torch
+from torch import Tensor
 
-from torch.optim.optimizer import Optimizer
-from abc import ABC, abstractmethod
+def mirror(input: Tensor):
+    """
+    對給定的輸入進行左右鏡像處理，回傳兩種對稱結果。
 
+    Args:
+        input (Tensor): 一個 2D tensor，形狀為 (H, W)
 
-#%% Import By Device
-FloatTensor = torch.FloatTensor if str(config.device) == 'cpu' else torch.cuda.FloatTensor # type: ignore
+    Returns:
+        Tuple[Tensor, Tensor]: 
+            - 第一個 tensor: 左半翻轉貼到右半. shape = (H, W)
+            - 第二個 tensor: 右半翻轉貼到左半, shape = (H, W)
 
-class SurrogateModel(ABC):
-    def __init__(self, model, criterion, optimizer, *, progress_callback = lambda i, n: None):
-        """
-        Parameters
-        ----------
-        progress_callback: function 
-            A callback function that will be called for every frame to notify
-            the saving progress. It must have the signature ::
+    Example:
+        >>> x = torch.tensor([[1, 2, 3],
+                              [4, 5, 6]])
+        >>> ltr, rtl = mirror(x)
+        >>> print(ltr)
+        tensor([[1, 2, 1],
+                [4, 5, 4]])
+        >>> print(rtl)
+        tensor([[3, 2, 3],
+                [6, 5, 6]])
+    """
+    mid = input.shape[1] // 2
 
-                def func(current_frame: int, total_frames: int) -> Any
+    if input.shape[1] % 2 == 0:
+        # Even width
+        left_half = input[:, :mid]
+        right_half = input[:, mid:]
 
-            where *current_frame* is the current frame number and
-            *total_frames* is the total number of frames to be saved.
-            *total_frames* is set to None, if the total number of frames can
-            not be determined. Return values may exist but are ignored.
+        # 左翻轉到右
+        left_to_right = torch.cat([left_half, torch.flip(left_half, dims=[1])], dim=1)
 
-            Example code to write the progress to stdout::
+        # 右翻轉到左
+        right_to_left = torch.cat([torch.flip(right_half, dims=[1]), right_half], dim=1)
 
-                progress_callback = lambda i, n: print(f'Saving frame {i}/{n}')
-        """
-        self.FloatTensor = torch.FloatTensor if str(config.device) == 'cpu' else torch.cuda.FloatTensor # type: ignore
-        self.epoch = 1
-        self.model: nn.Module = model
-        self.criterion: nn.Module = criterion
-        self.optimizer: Optimizer = optimizer
-        self.progress_callback = progress_callback
+    else:
+        # Odd width
+        left_half = input[:, :mid]
+        center = input[:, mid:mid+1]
+        right_half = input[:, mid+1:]
 
-    def save(self, rootdir):
-        # path = Path(rootdir).joinpath(f"sm_{self.epoch}.pth")
-        path = Path(rootdir).joinpath(f"sm.pth")
-        torch.save(self.model, path)
-        return path
+        # 左翻轉到右
+        left_to_right = torch.cat([left_half, center, torch.flip(left_half, dims=[1])], dim=1)
 
-    def load(self, rootdir):
-        path = Path(rootdir).joinpath(f"sm.pth")
-        self.model = path.load_torch()
+        # 右翻轉到左
+        right_to_left = torch.cat([torch.flip(right_half, dims=[1]), center, right_half], dim=1)
 
-    def __call__(self, pattern):
-        self.epoch += 1
-        return self.model(pattern)
-    def __str__(self):
-        return f"{self.__class__.__name__}(Model={self.model.__class__.__name__}, Optimizer={self.optimizer.__class__.__name__}, Criterion={self.criterion.__class__.__name__})"
+    return left_to_right, right_to_left
+
+def mutate(matrix:Tensor, rate):
+    total = matrix.numel()
+    n = total * rate
+    indices = torch.randperm(total).tolist()
+    selected_indices = indices[:n]
     
-    @abstractmethod
-    def train(self, pattern):
-        pass
-
-class SpecialSM(SurrogateModel):
-    def __init__(self):
-        model_ge = HFSSNet( # Pattern -> Response
-            AntennaPattern.getAllPixel(), AntennaResponse.size()
-        )
-        criterion_ge = nn.MSELoss()
-        optimizer_ge = Ranger(
-            params=model_ge.parameters(), lr=config.lr
-        )
-        self.scheduler_ge = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer_ge, mode="min", factor=0.5, patience=10, min_lr=1e-6
-        )
-        super().__init__(model_ge, criterion_ge, optimizer_ge)
-
-    def train(self, pattern):
-        self.model.train()
-        pattern = tensor(pattern)
-        sm_loss = []
-        for epoch_ge in range(500):
-            self.progress_callback(epoch_ge, 500)
-            self.optimizer.zero_grad()
-
-            response = self.model(pattern)
-            
-            match pattern.size(0):
-                case 625: #? 25*25
-                    s11 = AntennaResponse(response[0])
-                    s21 = AntennaResponse(response[1])
-                    s22 = AntennaResponse(response[2])
-
-                    loss_s11 = s11.criterion('S11')
-                    loss_s21 = s21.criterion('S21')
-                    loss_s22 = s22.criterion('S22')
-                    
-                    loss_ge:Tensor = loss_s11 + loss_s21 + loss_s22
-                case 1600: #? 40*40
-                    loss_ge:Tensor = AntennaResponse(response).criterion()
-                case _:
-                    raise ValueError(f'No matching settings found for {pattern.size(0)}')
-                
-            loss_ge.backward()
-            self.optimizer.step()
-            self.scheduler_ge.step(loss_ge.item())
-            sm_loss.append(loss_ge.item())
-
-        return sm_loss
-
-class OldSM(SurrogateModel):
-    def __init__(self):
-        model_ge = HFSSNet( # Pattern -> Response
-            AntennaPattern.getAllPixel(), AntennaResponse.size()
-        )
-        criterion_ge = nn.MSELoss()
-        optimizer_ge = Ranger(
-            params=model_ge.parameters(), lr=config['HFSS.lr']
-        )
-        self.scheduler_ge = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer_ge, mode="min", factor=0.5, patience=10, min_lr=1e-6
-        )
-        super().__init__(model_ge, criterion_ge, optimizer_ge)
-
-    def train(self, pattern:Tensor, real_response:Tensor):
-        self.model.train()
-        pilotLoss_2 = []
-        self.loss = float('inf')
-        epoch_2 = 0
-        
-        input = tensor(pattern,  requires_grad=True)
-        label = tensor(real_response,  requires_grad=True)
-        # for epoch in range(num_epochs):
-        # while self.loss > config['HFSS.min_loss'] and epoch_2 < config['HFSS.max_epoch']:
-        while self.loss > 1:
-            
-            self.optimizer.zero_grad()
-
-            outputs_result:Tensor = self.model(input)
-
-            loss_R:Tensor = self.criterion(
-                outputs_result.reshape(-1, *AntennaResponse.size()),
-                label.reshape(-1, *AntennaResponse.size())
-            )
-
-            loss_R.backward()
-            self.optimizer.step()
-            self.scheduler_ge.step(loss_R)
-
-            pilotLoss_2.append(loss_R.item())
-            self.loss = loss_R.item()
-            self.progress_callback(epoch_2, 2000)
-
-            epoch_2 = epoch_2 + 1
-
-        return pilotLoss_2
-
+    for idx in selected_indices:
+        i, j = divmod(idx, matrix.size(1))
+        matrix[i, j] = 1 - matrix[i, j]
+    return matrix

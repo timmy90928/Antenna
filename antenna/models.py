@@ -11,34 +11,7 @@ from torch.optim.optimizer import Optimizer
 
 import numpy as np
 from math import sqrt
-
-
-
-
-
-class GEN(nn.Module):
-
-    def __init__(self ,pattern_pixel):
-        super(GEN,self).__init__()
-        self.fc_patch = nn.Sequential(
-            nn.Linear(pattern_pixel, 2048),
-            nn.PReLU(),
-            nn.Linear(2048, 1024),
-            nn.PReLU(),
-            nn.Linear(1024, 512),
-            nn.PReLU(),
-            nn.Linear(512, 512),
-            nn.PReLU(),
-            nn.Linear(512, 361)
-        )
-
-        self.to(config.device)
-    
-    def forward(self, input):
-        x = self.fc_patch(input)
-        x = x.reshape(-1, 361)
-        return AntennaResponse(x)
-    
+   
 class BiScaleNorm(nn.Module):
     def __init__(self):
         super(BiScaleNorm, self).__init__()
@@ -180,18 +153,18 @@ class SPGEN(nn.Module):
     def __len__(self):
         return len(self.pattern_table)
     
-class PhaseGenModel(nn.Module):
+class OldGEN(nn.Module):
     """
     Generator Model
     """
-    def __init__(self , pattern_pixel):
-        super(PhaseGenModel,self).__init__()
+    def __init__(self):
+        super(OldGEN,self).__init__()
         self.fc_patch = nn.Sequential(
-            nn.Linear(361, 1024),
+            nn.Linear(AntennaResponse.size(flatten=True), 1024),
             nn.PReLU(),
             nn.Linear(1024, 1024),
             nn.PReLU(),
-            nn.Linear(1024, pattern_pixel),
+            nn.Linear(1024, AntennaPattern.size(flatten=True)),
             BiScaleNorm(),
         )
 
@@ -201,7 +174,7 @@ class PhaseGenModel(nn.Module):
     def forward(self, input):
         x = self.fc_patch(input)
         x = self.r(x) / 2 + 0.5 # type: ignore
-        return AntennaPattern(x)
+        return x
         # return x
 
 class GradientEstimator(nn.Module):
@@ -235,74 +208,3 @@ class GradientEstimator(nn.Module):
         output = self.conv(A)
         output = self.net(output)
         return AntennaResponse(output)
-    
-###* Train HFSS model function ###
-def train_HFSS_model(patch_pattern:List[Tensor], HFSS_result:List[Tensor], epoch, HFSS_model_name:Path):
-    NUM_CLASSES = 2*17 #沒用
-
-    # Train
-    init_lr_2 = 0.001
-
-    if epoch == 0:
-        HFSS_model = GEN(AntennaPattern.getAllPixel())
-        HFSS_model_name = Path("./")
-    else:
-        HFSS_model = HFSS_model_name.load_torch()
-    
-    _patch_pattern = torch.stack(patch_pattern, dim=0)
-    _HFSS_result = torch.stack(HFSS_result, dim=0)
-    
-    inputs_2 = Variable(_patch_pattern.type(FloatTensor))   # type: ignore
-    labels_2 = Variable(_HFSS_result.type(FloatTensor))     # type: ignore
-
-    HFSS_model.train()
-
-    criterion = nn.MSELoss()
-    
-    # Optimizer setting
-    optimizer_HFSS = torch.optim.Adam(params=HFSS_model.parameters(), lr=init_lr_2)
-    
-    flag_correct = True
-    
-    pilotLoss_2 = []
-    
-    
-    
-    epoch_2 = 0
-    
-    # for _epoch in tqdm(range(1200), leave=False):
-    
-    while (flag_correct):
-        
-        HFSS_model.train()
-
-        training_loss_2 = 0.0
-        
-
-        optimizer_HFSS.zero_grad()
-        
-        outputs_result:AntennaResponse = HFSS_model(inputs_2)
-        
-        loss_R:Tensor = criterion(outputs_result.vertical, labels_2.reshape(-1,361)) #?
-        
-        loss_R.backward()
-        optimizer_HFSS.step()
-        training_loss_2 += float(loss_R.item() * inputs_2.size(0))
-        
-        pilotLoss_2.append(training_loss_2)
-        
-        HFSS_model.eval()
-        
-        
-        if training_loss_2 < 0.0001 or epoch_2 == 800:
-            HFSS_model_name = config.checkpoint_save_path.joinpath(f"GEN_model_{epoch}.pth")
-            
-            torch.save(HFSS_model, str(HFSS_model_name))
-            config.checkpoint_save_path.manage_file_count(f"GEN_model_*.pth", 2)
-            
-            
-            flag_correct = False
-            break
-        
-        epoch_2 = epoch_2 + 1
-    return HFSS_model_name

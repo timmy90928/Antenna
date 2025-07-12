@@ -11,10 +11,6 @@ from torch import tensor, Tensor
 
 class PatchSimulator(ABC):
     def __init__(self, record_path:str, HFSS_sab_path:str, pixel_count:int):
-        self.kill()
-        # sleep(7)
-        self.open()
-
         self.path_record = Path(record_path).joinpath("HFSS").not_exist_create()
         self.HFSS_sab_path = str(HFSS_sab_path)
         self.pixel_count = pixel_count

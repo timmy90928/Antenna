@@ -15,6 +15,8 @@ class RISSimulator:
         self.element_num = element_num
         self.pre_calAF = self._calAF()
 
+    def __str__(self):
+        return f"RISSimulator(element_num={self.element_num})"
     def _calAF(self):
         """Calculate Array Factor"""
         c = 3e8  # 光速

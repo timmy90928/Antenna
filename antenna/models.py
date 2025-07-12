@@ -95,7 +95,8 @@ class HFSSNet(nn.Module):
             nn.PReLU(),
             nn.Linear(64, num_response[0]*num_response[1])
         )
-
+        self.to(config.device)
+        
     def __repr__(self):
         return f"{self.__class__.__name__}(num_pattern_pixel={self.num_pattern_pixel}, num_response={self.num_response}"
     

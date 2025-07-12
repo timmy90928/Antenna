@@ -1,13 +1,17 @@
 from .simulate_ris import RISSimulator
 from torch.functional import F
-def custom_loss(prediction, target, loss_type='SmoothL1Loss'):
+from torch import Tensor
+def custom_loss(prediction, target:Tensor, loss_type='SmoothL1Loss'):
+
+    high_response = target.max()
+    low_response = target.min()
 
     # 基本條件
-    mask_20 = target == -20
-    mask_b_20 = prediction[mask_20] > -20
+    mask_20 = target == low_response
+    mask_b_20 = prediction[mask_20] > low_response
 
-    mask_0 = target == 0
-    mask_s_0 = prediction[mask_0] < -3
+    mask_0 = target == high_response
+    mask_s_0 = prediction[mask_0] < low_response
 
     # 為了確保有梯度，設定條件不滿足時也會計入一個 dummy loss
     if mask_b_20.sum() > 0:

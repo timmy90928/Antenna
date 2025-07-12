@@ -41,6 +41,8 @@ class AntennaResponse:
     """
     Antenna Response Design.
 
+    Attributes:
+        response (Tensor): response
     """
     x_patch_n257 = np.linspace(24, 32, 17) #? 26.5 - 28 - 29.5
     x_ris = np.linspace(0, 360, 361)
@@ -76,7 +78,7 @@ class AntennaResponse:
 
     def __invert__(self):
         """Detach the response"""
-        return self.response.detach().cpu()
+        return self.response.detach().cpu().numpy()
     
     def _reshape2vertical(self):
         assert len(self.response.shape) == 1
@@ -111,6 +113,7 @@ class AntennaResponse:
 
     @classmethod
     def x(cls):
+        """Get the x-axis value of this response."""
         if not hasattr(cls, 'x'):
             RuntimeError("No x registered. Please use `registerLabels()` first.")
         return np.linspace(*cls._x)
@@ -119,13 +122,14 @@ class AntennaResponse:
     def size(cls, flatten:bool = False):
         """The number of labels used to calculate loss and the number of points in their labels."""
         if not hasattr(cls, 'labels'):
-            RuntimeError("No labels registered. Please use `registerLabels()` first.")
+            raise RuntimeError("No labels registered. Please use `registerLabels()` first.")
         _ = (len(cls.labels), cls._x[2])
         return _[0] * _[1] if flatten else _
         
     
     @classmethod
     def to_str(cls):
+        """Get response information and default values."""
         target_respons_str = " ".join([f"{k}({v})" for k, v in cls._target_response_str.items()])
         return f"AntennaResponse(labels={cls.labels}, size={cls.size()}, x={cls._x}, target={target_respons_str})"
     
@@ -134,8 +138,8 @@ class AntennaResponse:
         """
         Target Response Design.
 
-        :param side: 
-        :param center: 
+        :param side: The Y value at both ends of the response.
+        :param center: The y value of the center point of the response.
 
         :return: AntennaResponse
         
@@ -312,7 +316,7 @@ class AntennaPattern:
     
     def __invert__(self):
         """Detach the response"""
-        return self.series.detach().cpu()
+        return self.merge().detach().cpu().numpy()
     
     def input_dim(self) -> int:
         if self.input_tensor is None:
@@ -369,9 +373,9 @@ class AntennaPattern:
         if hasattr(self, "_simulator"):
             if no_grad:
                 with torch.no_grad():
-                    result:Dict = self._simulator(pattern, **param)
+                    result:Dict[str, Tensor] = self._simulator(pattern.detach(), **param)
             else:
-                result:Dict = self._simulator(pattern, **param)
+                result:Dict[str, Tensor]  = self._simulator(pattern, **param)
         else:
             raise RuntimeError("Please use `register_simulator()` to register the simulator.")
         

@@ -111,7 +111,7 @@ class OldSM(SurrogateModel):
         )
         criterion_ge = nn.MSELoss()
         optimizer_ge = Ranger(
-            params=model_ge.parameters(), lr=config.lr
+            params=model_ge.parameters(), lr=config['HFSS.lr']
         )
         self.scheduler_ge = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer_ge, mode="min", factor=0.5, patience=10, min_lr=1e-6
@@ -127,7 +127,8 @@ class OldSM(SurrogateModel):
         input = tensor(pattern,  requires_grad=True)
         label = tensor(real_response,  requires_grad=True)
         # for epoch in range(num_epochs):
-        while self.loss > 0.00005 and epoch_2 < 2000:
+        # while self.loss > config['HFSS.min_loss'] and epoch_2 < config['HFSS.max_epoch']:
+        while self.loss > 1:
             
             self.optimizer.zero_grad()
 
@@ -140,6 +141,7 @@ class OldSM(SurrogateModel):
 
             loss_R.backward()
             self.optimizer.step()
+            self.scheduler_ge.step(loss_R)
 
             pilotLoss_2.append(loss_R.item())
             self.loss = loss_R.item()

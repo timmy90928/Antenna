@@ -58,14 +58,14 @@ AntennaPattern.register_simulator(simulator)
 AntennaResponse.registerLabels('S11', 'Gain', x = 'n257')
 x = AntennaResponse.x()
 
-#? S11 S22 -> high low high
+#? S11 S22 -> high low high (-1.25, -12)
 returnloss = AntennaResponse.registerTargetResponse(-1.25, -15, (4, 2, 5, 2, 4), label="S11")
 returnloss_upper = AntennaResponse.registerTargetResponse(0, -10, (4, 2, 5, 2, 4), label="returnloss_upper")
 returnloss_lower = AntennaResponse.registerTargetResponse(-2.5, -50, (3, 4, 3, 4, 3), label="returnloss_lower")
 
 AntennaResponse.registerLossHook(custom_loss_r, label = "S11")
 
-#? Gain -> low high low
+#? Gain -> low high low (-2, -19.5) (-2, -25)
 gain = AntennaResponse.registerTargetResponse(-19, 0, (3, 0, 11, 0, 3), label="Gain")
 gain_upper = AntennaResponse.registerTargetResponse(-17, 0, (2, 3, 7, 3, 2), label="gain_upper")
 gain_lower = AntennaResponse.registerTargetResponse(-22, -3, (4, 2, 5, 2, 4), label="gain_lower")
@@ -97,7 +97,7 @@ optimizer = torch.optim.Adam(
 smodel = OldSM()
 
 ###* 斷點續跑 ###
-if is_connect_run:
+if is_connect_run and ('epoch' in TEMP):
     last_model = path_checkpoint.joinpath(f"gen_model_{TEMP('epoch')}.pth")
     Antenna_checkpoint_loaded = last_model.load_torch()
     model.load_state_dict(Antenna_checkpoint_loaded['state_dict'])
@@ -117,7 +117,7 @@ config.save(rootdir=RESULT_PATH)
 ###* Training ###
 epoch = TEMP('epoch', 0) # 總訓練次數
 current_epoch = 0   # 斷掉後的訓練次數
-jump = 0 # 跳躍次數
+jump = 0 # 跳躍次數 (pattern 重複，不重複模擬)
 while epoch < config.epochs + 1:
 
     epoch += 1
@@ -132,7 +132,7 @@ while epoch < config.epochs + 1:
     model.train()
     optimizer.zero_grad() # adjust_lr(optimizer, epoch, init_lr)
 
-    ###* 生成 pattern ###
+    ###* 生成 pattern 並儲存於 buffer ###
     #? target response -> 生成模型 -> pattern
     output_element = AntennaPattern(
         model(AntennaResponse.merge_target_responses())
@@ -142,14 +142,37 @@ while epoch < config.epochs + 1:
         fig.addAll()
         output_element.plot(fig[0])
 
-    output_result = output_element.simulate()
-    real_loss = AntennaResponse.multi_responses_to_loss(output_result)
+    ###* 檢查 pattern 是否重複，不重複模擬 ###
+    if 'patch_pattern_buf' not in TEMP or TEMP.index('patch_pattern_buf', ~output_element) is None:
+        #* 未重複，進行HFSS模擬
+        output_result = output_element.simulate()
+        real_loss = AntennaResponse.multi_responses_to_loss(output_result)
+        stack_output_result = stack([ n.response for n in output_result.values()])
+        TEMP['real_loss'] = real_loss.item()    # 儲存 HFSS結果 的 loss
 
-    ###* 儲存HFSS的輸入與輸出 ###
+        jump = 0
+        
+    else:
+        #* 重複，直接使用之前的結果
+        stack_output_result = TEMP.find(
+            'patch_pattern_buf', ~output_element, 'patch_result_buf'
+        )
+        jump = jump + 1
+
+    ###* 更新 loss 的最小值 ###
+    #? de: 更新最小loss的次數
+    min_loss = TEMP('min_loss', float('inf'))
+    if TEMP('real_loss') <= min_loss:
+        min_loss = TEMP('real_loss')
+        TEMP.add('de', 0, default = 0)
+    else:
+        min_loss = min_loss
+        TEMP.add('de', 1, default = 0)
+    TEMP["min_loss"] = min_loss
+
+    ###*  儲存HFSS的輸入與輸出，再訓練代理模型並儲存 ###
     TEMP['patch_pattern_buf'] = ~output_element
-    TEMP['patch_result_buf'] = stack([ n.response for n in output_result.values()])
-
-    ###* 訓練代理模型並儲存 ###
+    TEMP['patch_result_buf'] = stack_output_result
     sm_loss = smodel.train(output_element.series, TEMP('patch_result_buf'))
     smodel.save(path_checkpoint)
 
@@ -167,6 +190,7 @@ while epoch < config.epochs + 1:
     loss.backward()
     optimizer.step()
     model.eval()
+    TEMP['fake_loss'] = loss.item() # 儲存 GEN 與 代理模型 的 loss
 
     ###* 儲存模型 ###
     gen_checkpoint = {
@@ -176,24 +200,6 @@ while epoch < config.epochs + 1:
     }
     torch.save(gen_checkpoint, path_checkpoint.joinpath(f"gen_model_{epoch}.pth"))
 
-    ###* 儲存real與fake的loss ###
-    TEMP['real_loss'] = real_loss.item()
-    TEMP['fake_loss'] = loss.item() 
-
-    if (False and (TEMP('patch_pattern_buf') == TEMP['patch_pattern_buf'][-2]).all()):
-        jump = jump + 1
-    else:
-
-        min_loss = TEMP('min_loss', float('inf'))
-        if TEMP('real_loss') <= min_loss:
-            min_loss = TEMP('real_loss')
-            de = TEMP('de', 0)
-
-        else:
-            min_loss = TEMP('min_loss', float('inf'))
-            de = TEMP('de', 0) + 1
-        jump = 0
-    
     with Figure(f"Result {epoch}",(2,2), rootdir=path_pic, save=True, size=(18*2, 9*2)) as fig:
         fig.addAll()
 
@@ -221,12 +227,9 @@ while epoch < config.epochs + 1:
 
     
     exe_time = simulator.end()
-    logger.info(f"End {epoch} of {config.epochs}, Loss: {TEMP('real_loss'):4f}, Time: {exe_time} s")
+    logger.info(f"End {epoch} of {config.epochs}, Loss: {TEMP('real_loss'):4f}, Time: {exe_time} s, jump: {jump}")
 
-    TEMP['de'] = de     #  np.save(path_save_data.joinpath("de.npy"), de)
     TEMP['epoch'] = epoch
-    TEMP["min_loss"] = min_loss    # np.save(path_save_data.joinpath("min_loss.npy"), min_loss.detach().numpy())
-
     TEMP.save(f"{epoch} times")
 
 logger.info(f"Training Finished! (Min Loss: {TEMP.custom('real_loss', min)})")

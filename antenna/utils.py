@@ -5,6 +5,7 @@ from typing import (
 from typing_extensions import Self
 from loguru import logger
 import traceback
+import torch
 from torch import (
     __version__,
     nn,
@@ -18,7 +19,8 @@ from torch import (
     # get_default_device,
     set_default_device,
     stack,
-    concat
+    concat,
+    set_grad_enabled, is_grad_enabled # with no_grad():...
 )
 from numpy import (
     ndarray,
@@ -39,6 +41,7 @@ from warnings import filterwarnings
 
 from pathlib import Path as _Path
 from os.path import getctime
+from sys import maxsize
 
 import numpy as np
 from copy import deepcopy
@@ -622,6 +625,9 @@ class Figure:
         return self.nrowcol[0] * self.nrowcol[1]
 
     def __enter__(self):
+        self.prev = is_grad_enabled()
+        set_grad_enabled(False)
+
         return self
 
     def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback):
@@ -629,6 +635,7 @@ class Figure:
             if self.show: plt.show()
             if self.save: self.saveIMG()
         plt.close()
+        set_grad_enabled(self.prev)
 
 class Record:
     def __init__(self, name:str = "record", rootdir:Optional[str] = None, load:bool = False):
@@ -707,15 +714,85 @@ class Record:
     def average(self, key):
         return sum(self._data[key]) / len(self._data)
     
-    def same(self, key, value, *, start:int = 0, end:int = -1):
-        if isinstance(value, ndarray):
-            return  any(
-                np.array_equal(value, x) 
-                for x in self._data[key][start:end]
-            )
+    def index(self, key:str, value, *, start:int = 0, stop:int = maxsize) -> Optional[int]:
+        """
+        Find the index of `value` in `key`.
+        
+        Returns:
+            Returns the index value, starting from 0. 
 
-        return value in self._data[key][start:end]
+            If `value` is not in `key`, returns `None`.
+
+        Example:
+            ```
+            temp = Record('temp')
+            for epoch in range(1, 10+1):
+                temp['epoch'] = epoch
+            print(temp.index('epoch', 0)) # None
+            print(temp.index('epoch', 1)) # 0
+            ```
+        """
+        if isinstance(value, ndarray):
+            _result = [
+                np.array_equal(value, x) 
+                for x in self[key][start:stop]
+            ]
+        elif isinstance(value, Tensor):
+            import torch
+            _result = [
+                torch.equal(value, x) 
+                for x in self[key][start:stop]
+            ]
+        else:
+            if value in self[key]:
+                return self[key].index(value, start, stop)
+            else:
+                return None
+        
+        if True in _result:
+            return _result.index(True)
+        else:
+            return None
     
+    @overload
+    def find(self, key, value, other_keys:str, *, start=0, stop=maxsize) -> Optional[Any]:...
+    @overload
+    def find(self, key, value, other_keys:Tuple[str, ...] , *, start=0, stop=maxsize) -> Optional[List[Any]]:...
+
+    def find(self, key, value, other_keys, *, start=0, stop=maxsize):
+        """
+        Find the `value` in `key` that corresponds to `other keys`.
+
+        Returns:
+            Returns the `value` corresponding to the `other key`.
+
+            If `value` is not in `key`, returns `None`.
+
+        Examples:
+            ```
+            temp = Record('temp')
+            for epoch, (a, b) in enumerate(zip(
+                ['a1', 'a2', 'a3'], ['b1', 'b2', 'b3']
+            ), start = 1):
+                temp['epoch'] = epoch
+                temp['a'] = a
+                temp['b'] = b
+
+            print(temp.find('a', 'a1', "epoch"))    # 1
+            print(temp.find('epoch', 3, ('a','b'))) # ['a3', 'b3']
+            ```
+        """
+        _index = self.index(key, value, start=start, stop=stop)
+        if _index is None:
+            return None
+        elif isinstance(other_keys, str):
+            return self[other_keys][_index]
+        else:
+            _result = []
+            for other_key in other_keys:
+                _result.append(self[other_key][_index])
+            return _result
+
     def early_stop(self, key: str, patience: int = 10) -> bool:
         """
         根據指定 key 的歷史資料，決定是否應該 early stop。

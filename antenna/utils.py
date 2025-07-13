@@ -812,8 +812,11 @@ class Record:
     def reset(self):
         self._data = defaultdict(list)
     
-    def custom(self, key:str, fn:Callable):
-        return fn(self._data[key])
+    def custom(self, key:str, fn:Callable, *, default = None):
+        _ket_data = self._data[key]
+        if _ket_data:
+            return fn(_ket_data)
+        return default
     
     @property
     def dataframe(self):

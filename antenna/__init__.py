@@ -441,6 +441,18 @@ class AntennaPattern:
         if show: plt.show()
         return ax
 
+    def mutate(self, rate):
+        matrix = self.merge()
+        total = matrix.numel()
+        n = int(total * rate)
+        indices = torch.randperm(total).tolist()
+        selected_indices = indices[:n]
+        
+        for idx in selected_indices:
+            i, j = divmod(idx, matrix.size(1))
+            matrix[i, j] = 1 - matrix[i, j]
+        return AntennaPattern(matrix)
+
 def reshape(_tensor:torch.Tensor):
     _shape = _tensor.shape
     if len(_shape) == 1:

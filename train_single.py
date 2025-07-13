@@ -59,13 +59,13 @@ AntennaResponse.registerLabels('S11', 'Gain', x = 'n257')
 x = AntennaResponse.x()
 
 #? S11 S22 -> high low high (-1.25, -12)
-returnloss = AntennaResponse.registerTargetResponse(-1.25, -15, (4, 2, 5, 2, 4), label="S11")
+returnloss = AntennaResponse.registerTargetResponse(-1.25, -12, (4, 2, 5, 2, 4), label="S11")
 returnloss_upper = AntennaResponse.registerTargetResponse(0, -10, (4, 2, 5, 2, 4), label="returnloss_upper")
 returnloss_lower = AntennaResponse.registerTargetResponse(-2.5, -50, (3, 4, 3, 4, 3), label="returnloss_lower")
 
 AntennaResponse.registerLossHook(custom_loss_r, label = "S11")
 
-#? Gain -> low high low (-2, -19.5) (-2, -25)
+#? Gain -> low high low (-2, -19.5) (0, -25)
 gain = AntennaResponse.registerTargetResponse(-19, 0, (3, 0, 11, 0, 3), label="Gain")
 gain_upper = AntennaResponse.registerTargetResponse(-17, 0, (2, 3, 7, 3, 2), label="gain_upper")
 gain_lower = AntennaResponse.registerTargetResponse(-22, -3, (4, 2, 5, 2, 4), label="gain_lower")
@@ -138,6 +138,21 @@ while epoch < config.epochs + 1:
         model(AntennaResponse.merge_target_responses())
     ) + lower
 
+    if TEMP.early_stop('real_loss', 2):
+        ###* Mutation ###
+        TEMP['mutation'] = TEMP('real_loss', 0)
+        output_element = output_element.mutate(0.2)
+
+        ###* Rollback ###
+        epoch = TEMP.find('real_loss', TEMP('min_loss', float('inf')), 'epoch')
+        best_model = path_checkpoint.joinpath(f"gen_model_{epoch}.pth")
+        Antenna_checkpoint_loaded = best_model.load_torch()
+        model.load_state_dict(Antenna_checkpoint_loaded['state_dict'])
+        optimizer.load_state_dict(Antenna_checkpoint_loaded['optimizer'])
+    else:
+        TEMP['mutation'] = 0
+
+
     with Figure(f"pattern_{epoch}", save=True, rootdir=path_pic) as  fig:
         fig.addAll()
         output_element.plot(fig[0])
@@ -154,9 +169,10 @@ while epoch < config.epochs + 1:
         
     else:
         #* 重複，直接使用之前的結果
-        stack_output_result = TEMP.find(
-            'patch_pattern_buf', ~output_element, 'patch_result_buf'
+        stack_output_result, real_loss = TEMP.find(
+            'patch_pattern_buf', ~output_element, ('patch_result_buf', 'real_loss')
         )
+        TEMP['real_loss'] = real_loss
         jump = jump + 1
 
     ###* 更新 loss 的最小值 ###
@@ -184,8 +200,8 @@ while epoch < config.epochs + 1:
     #? target response -> 生成模型 -> pattern -> 代理模型 -> predicted response
     #? calculate loss (target response, predicted response)
     #? update optimizer
-    output_element = model(AntennaResponse.merge_target_responses())
-    response = smodel(output_element)
+    # output_element = model(AntennaResponse.merge_target_responses())
+    response = smodel(output_element.series)
     loss = AntennaResponse.multi_responses_to_loss(response)
     loss.backward()
     optimizer.step()
@@ -203,22 +219,23 @@ while epoch < config.epochs + 1:
     with Figure(f"Result {epoch}",(2,2), rootdir=path_pic, save=True, size=(18*2, 9*2)) as fig:
         fig.addAll()
 
-        fig[0].plot(x,output_result['S11'].response.cpu(), color='blue')
+        fig[0].plot(x,stack_output_result[0].cpu(), color='blue')
         fig[0].plot(x,returnloss.cpu(), color='blue', linestyle='--')
         fig[0].plot(x,returnloss_upper.cpu(), color='red')
         fig[0].plot(x, returnloss_lower.cpu(), color='red')
         fig[0].set_title('S11 Response', fontsize=20)
-        fig[0].set_ylim(-13,1)
+        fig[0].set_ylim(-15,1)
 
-        fig[1].plot(x,output_result['Gain'].response.cpu(), color='blue')
+        fig[1].plot(x,stack_output_result[1].cpu(), color='blue')
         fig[1].plot(x,gain.cpu(), color='blue', linestyle='--')
         fig[1].plot(x,gain_upper.cpu(), color='red')
         fig[1].plot(x, gain_upper.cpu(), color='red')
         fig[1].set_title('Gain', fontsize=20)
-        fig[1].set_ylim(-13,1)
+        fig[1].set_ylim(-20,1)
         
         fig[2].plot(TEMP['real_loss'], color='red', label='real_loss')
         fig[2].plot(TEMP['fake_loss'], color='purple', label='fake_loss', alpha=0.8)
+        fig[2].plot(TEMP['mutation'], label='mutation')
         fig[2].legend()
         fig[2].set_title("Loss Curve", fontsize=20)
 

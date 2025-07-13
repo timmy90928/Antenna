@@ -20,6 +20,7 @@ from antenna.patch import (
     SinglePortSimulator, custom_loss_g, custom_loss_r
 )
 from antenna.smodels import OldSM
+from antenna.functions import mirror
 #%% 
 ###* Basic Config ###
 RESULT_PATH, is_connect_run = get_result_path('test')
@@ -75,16 +76,16 @@ with Figure('Target Response', (1, 2), rootdir=RESULT_PATH, save=True, size=(18*
     fig.addAll()
     
     fig[0].set_title('S11')
-    fig[0].plot(x, returnloss.detach().numpy(), color='red', marker="o")
-    fig[0].plot(x, returnloss_upper, color='blue', marker="o")
-    fig[0].plot(x, returnloss_lower, color='blue', marker="o")
+    fig[0].plot(x, returnloss.detach().cpu(), color='red', marker="o")
+    fig[0].plot(x, returnloss_upper.detach().cpu(), color='blue', marker="o")
+    fig[0].plot(x, returnloss_lower.detach().cpu(), color='blue', marker="o")
     fig[0].grid(True)
     # fig[0].set_ylim(-13, 1)
     
     fig[1].set_title('Gain')
-    fig[1].plot(x,gain.detach().numpy(), color='red', marker="o")
-    fig[1].plot(x, gain_upper, color='blue', marker="o")
-    fig[1].plot(x, gain_lower, color='blue', marker="o")
+    fig[1].plot(x,gain.detach().cpu(), color='red', marker="o")
+    fig[1].plot(x, gain_upper.detach().cpu(), color='blue', marker="o")
+    fig[1].plot(x, gain_lower.detach().cpu(), color='blue', marker="o")
     fig[1].grid(True)
     fig[1].grid(True)
 
@@ -141,20 +142,6 @@ while epoch < config.epochs + 1:
         fig.addAll()
         output_element.plot(fig[0])
 
-    if (False and (TEMP('patch_pattern_buf') == TEMP['patch_pattern_buf'][-2]).all()):
-        jump = jump + 1
-    else:
-
-        min_loss = TEMP('min_loss', float('inf'))
-        if TEMP('real_loss') <= min_loss:
-            min_loss = TEMP('real_loss')
-            de = TEMP('de', 0)
-
-        else:
-            min_loss = TEMP('min_loss', float('inf'))
-            de = TEMP('de', 0) + 1
-        jump = 0
-
     output_result = output_element.simulate()
     real_loss = AntennaResponse.multi_responses_to_loss(output_result)
 
@@ -193,21 +180,34 @@ while epoch < config.epochs + 1:
     TEMP['real_loss'] = real_loss.item()
     TEMP['fake_loss'] = loss.item() 
 
+    if (False and (TEMP('patch_pattern_buf') == TEMP['patch_pattern_buf'][-2]).all()):
+        jump = jump + 1
+    else:
+
+        min_loss = TEMP('min_loss', float('inf'))
+        if TEMP('real_loss') <= min_loss:
+            min_loss = TEMP('real_loss')
+            de = TEMP('de', 0)
+
+        else:
+            min_loss = TEMP('min_loss', float('inf'))
+            de = TEMP('de', 0) + 1
+        jump = 0
     
     with Figure(f"Result {epoch}",(2,2), rootdir=path_pic, save=True, size=(18*2, 9*2)) as fig:
         fig.addAll()
 
-        fig[0].plot(x,output_result['S11'].response, color='blue')
-        fig[0].plot(x,returnloss, color='blue', linestyle='--')
-        fig[0].plot(x,returnloss_upper, color='red')
-        fig[0].plot(x, returnloss_lower, color='red')
+        fig[0].plot(x,output_result['S11'].response.cpu(), color='blue')
+        fig[0].plot(x,returnloss.cpu(), color='blue', linestyle='--')
+        fig[0].plot(x,returnloss_upper.cpu(), color='red')
+        fig[0].plot(x, returnloss_lower.cpu(), color='red')
         fig[0].set_title('S11 Response', fontsize=20)
         fig[0].set_ylim(-13,1)
 
-        fig[1].plot(x,output_result['Gain'].response, color='blue')
-        fig[1].plot(x,gain, color='blue', linestyle='--')
-        fig[1].plot(x,gain_upper, color='red')
-        fig[1].plot(x, gain_upper, color='red')
+        fig[1].plot(x,output_result['Gain'].response.cpu(), color='blue')
+        fig[1].plot(x,gain.cpu(), color='blue', linestyle='--')
+        fig[1].plot(x,gain_upper.cpu(), color='red')
+        fig[1].plot(x, gain_upper.cpu(), color='red')
         fig[1].set_title('Gain', fontsize=20)
         fig[1].set_ylim(-13,1)
         

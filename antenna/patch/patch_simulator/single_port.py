@@ -12,10 +12,7 @@ class SinglePortSimulator(PatchSimulator):
         pixel_column = self.pixel_count
         one_num = 0
 
-        output_npy_element = pixel_matrix
-        # np.save(self.record_path+'npy/NN_patch_' + str(Design_index), output_npy_element)
-
-        pixel_matrix = pixel_matrix.reshape(pixel_row, pixel_column)
+        pixel_matrix = pixel_matrix.reshape(pixel_row, pixel_column).cpu()
 
         oDesign = self.oDesign
         oEditor = oDesign.SetActiveEditor("3D Modeler")

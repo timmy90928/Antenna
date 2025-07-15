@@ -793,19 +793,31 @@ class Record:
                 _result.append(self[other_key][_index])
             return _result
 
-    def early_stop(self, key: str, patience: int = 10) -> bool:
+    def early_stop(self, key: str, patience: int = 10, is_maximize: bool = False) -> bool:
         """
         根據指定 key 的歷史資料，決定是否應該 early stop。
         若最近 `patience` 次都沒有改善，回傳 True。
+        Args:
+            is_maximize: 若為 True, 則尋找最大值, 否則尋找最小值。
         """
         values = self._data[key]
         if len(values) < patience + 1:
             return False  # 數據不足，不應該停止
 
-        best = min(values[:-patience])
-        recent = values[-patience:]
+        # 根據是最大化還是最小化來決定如何判斷最佳值
+        if is_maximize:
+            best_func = max
+            comparison_op = lambda current, best: current <= best # 對於最大化，如果當前值小於最佳值則視為退步
+        else:
+            best_func = min
+            comparison_op = lambda current, best: current >= best # 對於最小化，如果當前值大於最佳值則視為退步
 
-        if all(v <= best for v in recent):
+        # 'best_so_far' 應該是到目前為止，在 patience 視窗之前所見的整體最佳值
+        best_so_far = best_func(values[:len(values) - patience])
+        recent_values = values[len(values) - patience:]
+
+        # 檢查所有最近的數值是否都比 best_so_far 差
+        if all(comparison_op(v, best_so_far) for v in recent_values):
             return True
         return False
 

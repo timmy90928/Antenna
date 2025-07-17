@@ -84,7 +84,7 @@ class OldSM(SurrogateModel):
         label = tensor(real_response,  requires_grad=True)
         # for epoch in range(num_epochs):
         # while self.loss > config['HFSS.min_loss'] and epoch_2 < config['HFSS.max_epoch']:
-        while self.loss > 1:
+        while self.loss > 0.1:
             
             self.optimizer.zero_grad()
 

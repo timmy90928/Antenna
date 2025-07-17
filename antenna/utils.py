@@ -832,8 +832,19 @@ class Record:
     
     @property
     def dataframe(self):
+        processed_data = {}
+        for key, values in self._data.items():
+            processed_values = []
+            for item in values:
+                if isinstance(item, torch.Tensor):
+                    # Move to CPU and detach to convert to a standard Python list/number
+                    processed_values.append(item.cpu().detach().tolist())
+                else:
+                    processed_values.append(item)
+
+            processed_data[key] = processed_values
         try:
-            return DataFrame(self._data)
+            return DataFrame(processed_data)
         except ValueError as e:
             raise ValueError(f"{e}\n{repr(self)}")
 

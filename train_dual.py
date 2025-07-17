@@ -89,9 +89,9 @@ with Figure('Target Response', (1, 2), rootdir=RESULT_PATH, save=True, size=(18*
     # fig[0].set_ylim(-13, 1)
     
     fig[1].set_title('S21')
-    fig[1].plot(x,gain.detach().numpy(), color='red', marker="o")
-    fig[1].plot(x, gain_upper, color='blue', marker="o")
-    fig[1].plot(x, gain_lower, color='blue', marker="o")
+    fig[1].plot(x,gain.cpu().detach().numpy(), color='red', marker="o")
+    fig[1].plot(x, gain_upper.cpu(), color='blue', marker="o")
+    fig[1].plot(x, gain_lower.cpu(), color='blue', marker="o")
     fig[1].grid(True)
 
 ###*  初始化神經網絡模型 ###

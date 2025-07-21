@@ -13,22 +13,34 @@ from time import time
 
 # __all__ = ["AntennaPattern", "AntennaResponse", "GradientEstimator", "SPGEN"]
 
-def get_result_path(name = None, *, set_logger:bool = True):
+def get_result_path(name:str = "{id}", *, set_logger:bool = True):
     """
+    Args:
+        name: Folder and log name, support {id}.
+        set_logger: Whether to set the logger.
+            EX: XXX.log
+
+    Examples: (equivalence)
     ```
     RESULT_PATH, EXISTS = get_result_path()
+    RESULT_PATH, EXISTS = get_result_path("{id}")
+
     NAME = RESULT_PATH.stem
     ```
     """
-    result_path = Path(__file__).parent.parent.joinpath("result", str(name or int(time())))
+    _now = int(time())
+    result_path = Path(__file__).parent.parent.joinpath(
+        "result", str(name.format(id = _now))
+    )
     exists  = result_path.exists()
     result_path.not_exist_create()
 
-    logger.add(
-        result_path.joinpath(f"{result_path.stem}.log"),
-        format = "{time:YYYY-MM-DD HH:mm:ss} {level} {message}",
-        level = "INFO",
-    )
+    if set_logger:
+        logger.add(
+            result_path.joinpath(f"{result_path.stem}.log"),
+            format = "{time:YYYY-MM-DD HH:mm:ss} {level} {message}",
+            level = "INFO",
+        )
     return result_path, exists
 
 def mult(_ob):
@@ -37,44 +49,174 @@ def mult(_ob):
         _result *= i
     return _result
 
+class MultiResponses:
+    def __init__(self, responses:Union[dict, Tensor] = None):
+        _responses:Dict[str, AntennaResponse] = {}
+        if isinstance(responses, Dict):
+            for key, response in responses.items():
+                _responses[key] = AntennaResponse(response)
+        elif isinstance(responses, Tensor):
+            for n, response in enumerate(responses.reshape(AntennaResponse.size())):
+                _responses[n] = AntennaResponse(response)
+        elif responses is None:
+            pass
+        else:
+            raise TypeError(f"Expected type `dict or Tensor`, but got type {type(responses)}")
+        self.responses = _responses
+
+    def __len__(self) -> int:
+        return len(self.responses)
+
+    def __str__(self):
+        responses_str = " ".join([f"{k}[{v.response.shape.numel()}]" for k, v in self.responses.items()])
+        return f"MultiResponses(num={self.__len__()}, key={responses_str})"
+
+    def __getitem__(self, key) -> "AntennaResponse":
+        if isinstance(key, int):
+            if key >= self.__len__():
+                raise IndexError(f"Expected size {self.__len__()} but got size {key}")
+            key = list(self.responses.keys())[key]
+
+        return self.responses[key]
+    
+    def __setitem__(self, key, value):
+        self.responses[key] = AntennaResponse(value)
+
+    def __delitem__(self, key):
+        del self.responses[key]
+
+    def stack(self):
+        return stack([ n.response for n in self.responses.values()])
+    
+    def concat(self):
+        return concat([ n.response for n in self.responses.values()])
+    
+    def criterion(self):
+        """The loss will be calculated from the registered labels."""
+        responses = {}
+        for label, res in zip(AntennaResponse.labels, self.stack()):
+            responses[label] = res
+
+        loss = tensor(0.0, requires_grad=True)
+        for key, value in responses.items():
+            loss = loss + AntennaResponse(value).criterion(key)
+        return loss
+
+class TargetResponse(MultiResponses):
+    def __init__(self):
+        super().__init__(None)
+        self._note = {}
+
+    def __getitem__(self, key):
+        """
+        Target Response Design.
+
+        Use `setTargetResponse()` before use, otherwise use the default value
+        """
+        if key not in self._note.keys():
+            raise RuntimeError(
+                f"The {key} of TargetResponse is not registered. " \
+                "Please use `registerTargetResponse()` first."
+            )
+        return super().__getitem__(key)
+    
+    def __call__(self, side:float, center:float, width:Tuple[int,int,int,int,int], label:str = "response", add:bool = False) -> Tensor:
+        """
+        Target Response Design.
+
+        :param side: The Y value at both ends of the response.
+        :param center: The y value of the center point of the response.
+
+        :return: AntennaResponse
+        
+        """
+        if len(width) != 5:
+            raise ValueError(f"Expected 5 width, but got {len(width)}")
+        mask_up = np.concatenate([
+            np.ones(width[0]) * side,
+            np.linspace(side, center, width[1]),
+            np.ones(width[2]) * center,
+            np.linspace(center, side, width[3]),
+            np.ones(width[4]) * side
+        ])
+        # expected_response = np.array(mask_up)#.reshape(-1, sum(_width))
+        expected_response = tensor(np.array(mask_up), dtype=torch.float32, device=config.device)
+
+        if add:
+            self[label] = expected_response
+            self._note[label] = f"side={side}, center={center}, width={width}"
+     
+        return expected_response
+    
+    def concat(self):
+        _result = super().concat()
+        if _result.size(0) != AntennaResponse.size(flatten = True):
+            raise RuntimeError(
+                'The concat size does not match the set size. ' \
+                'Please check `AntennaResponse.registerLabels()`' \
+                f'\n{_result.size(0)} != {AntennaResponse.size(flatten = True)}{AntennaResponse.size()}'
+            )
+        return _result
+    
+    def __str__(self):
+        _ = " ".join([f"{key}({value})" for key, value in self._note.items()])
+        return f"TargetResponse({_})"
+    
 class AntennaResponse:
     """
     Antenna Response Design.
 
     Attributes:
         response (Tensor): response
+        target (TargetResponse): target response
     """
     x_patch_n257 = np.linspace(24, 32, 17) #? 26.5 - 28 - 29.5
     x_ris = np.linspace(0, 360, 361)
     _target_response = {}
     _target_response_str = {}
     _loss_fn_hook = {}
-    def __init__(self, response:Tensor):
+    target = TargetResponse()
+    
+    @overload
+    def __new__(cls, response:Tensor) -> "AntennaResponse":...
+    @overload
+    def __new__(cls, responses:Dict) -> "MultiResponses":...
+
+    def __new__(cls, response):
+        if isinstance(response, cls):
+            return response
+        elif isinstance(response, Dict):
+            return MultiResponses(response)
+        else:
+            return super(AntennaResponse, cls).__new__(cls)
+
+    def __init__(self, response:Union[Tensor, Dict]):
         """
         Antenna Response Design.
 
         Args:
-            response (Tensor): Response of the antenna.
-    
-        Return:
-            AntennaResponse
+            response: Response of the antenna.
         
         Raises:
             TypeError: If the response is not a tensor.
         
         """
-        if isinstance(response, AntennaResponse):
-            response = response.response
-        if not isinstance(response, Tensor):
+        if isinstance(response,(AntennaResponse, Dict) ):
+            return
+        elif isinstance(response, Tensor):
+            response = response.to(config.device)
+        else:
             raise TypeError("Expected Tensor, but got {}".format(type(response)))
-        response = response.to(config.device)
-
+        
         if len(response.shape) == 1:
             self.response = response
             self.vertical = self._reshape2vertical()
         else:
             self.response = response.reshape(-1)
             self.vertical = response
+
+    def __str__(self):
+        return f"AntennaResponse(size={self.response.size().numel()})"
 
     def __invert__(self):
         """Detach the response"""
@@ -98,6 +240,8 @@ class AntennaResponse:
     @classmethod
     def registerLabels(cls, *labels:str, x:Union[tuple[int, int, int], Literal['ris', 'n257']] = 'ris') -> Tensor:
         """
+        The loss will be calculated from the registered labels.
+
         :param x: (start, stop, total)
         """
         match x:
@@ -130,8 +274,8 @@ class AntennaResponse:
     @classmethod
     def to_str(cls):
         """Get response information and default values."""
-        target_respons_str = " ".join([f"{k}({v})" for k, v in cls._target_response_str.items()])
-        return f"AntennaResponse(labels={cls.labels}, size={cls.size()}, x={cls._x}, target={target_respons_str})"
+        # target_respons_str = " ".join([f"{k}({v})" for k, v in cls._target_response_str.items()])
+        return f"AntennaResponse(labels={cls.labels}, size={cls.size()}, x={cls._x}, target={cls.target})"
     
     @classmethod
     def registerTargetResponse(cls, side:float, center:float, width:Tuple[int,int,int,int,int], label:str = "response") -> Tensor:
@@ -144,117 +288,84 @@ class AntennaResponse:
         :return: AntennaResponse
         
         """
-        if len(width) != 5:
-            raise ValueError(f"Expected 5 width, but got {len(width)}")
-        mask_up = np.concatenate([
-            np.ones(width[0]) * side,
-            np.linspace(side, center, width[1]),
-            np.ones(width[2]) * center,
-            np.linspace(center, side, width[3]),
-            np.ones(width[4]) * side
-        ])
-        # expected_response = np.array(mask_up)#.reshape(-1, sum(_width))
-        expected_response = tensor(np.array(mask_up), dtype=torch.float32, device=config.device)
-
-        if label:
-            cls._target_response[label] = expected_response
-            cls._target_response_str[label] = f"side={side}, center={center}, width={width}"
-        
-
-        return expected_response
-
-    @classmethod
-    def getTargetResponse(cls, label:str = "response") -> Tensor:
-        """
-        Target Response Design.
-
-        Use `setTargetResponse()` before use, otherwise use the default value
-
-        """
-        if label not in cls._target_response.keys():
-            raise RuntimeError(
-                f"The {label} of TargetResponse is not registered. Please use `registerTargetResponse()` first."
-            )
-        return cls._target_response[label]
-    
-    @classmethod
-    def registerLossHook(cls, loss_hook:Callable[[Tensor,Tensor], Tensor], label:str = "response"):
-        """
-        :param loss_hook: ```def criterion(response, target_response):...``` 
-        """
-        cls._loss_fn_hook[label] = loss_hook
-
-    def criterion(self, label:str = "response", **param) -> Tensor:
-        
-        if label not in self._loss_fn_hook.keys():
-            raise RuntimeError(f"The {label} of LossHook is not registered. Please use `registerLossHook()` first.")
-        
-        return self._loss_fn_hook[label](
-            self.response, self.getTargetResponse(label), **param
-        )
-    
-    @classmethod
-    def multi_responses_to_loss(cls, responses:Union[dict[str, Any], Tensor]):
-        if isinstance(responses, Tensor): 
-            responses_tensor = responses.reshape(cls.size())
-
-            responses = {}
-            for label, res in zip(cls.labels, responses_tensor):
-                responses[label] = res
-
-
-        loss = tensor(0.0, requires_grad=True)
-        for key, value in responses.items():
-            loss = loss + cls(value).criterion(key)
-        return loss
-    
-    @classmethod
-    def merge_target_responses(cls):
         if not hasattr(cls, 'labels'):
             raise RuntimeError(
                 "No labels registered. Please use `registerLabels()` first."
             )
-        _result_list = []
-        for label in cls.labels:
-            _result_list.append(cls.getTargetResponse(label))
-        _result = concat(_result_list)
-        if _result.size(0) != cls.size(flatten = True):
-            raise 
-        return _result
+        is_add = label in cls.labels
+        return cls.target(side, center, width, label = label, add = is_add)
+
+    @classmethod
+    def registerLossHook(cls, loss_hook:Callable[[Tensor,Tensor], Tensor], label:str = "response"):
+        """
+        Args:
+        
+            loss_hook: Used for `criterion()`
+
+            ```
+            def criterion(response, target_response):...
+            ```
+        
+        """
+        cls._loss_fn_hook[label] = loss_hook
+
+    def criterion(self, label:str = "response", **param) -> Tensor:
+        """[Loss Function] Register LossHook using `registerLossHook()` before use."""
+        if label not in self._loss_fn_hook.keys():
+            raise RuntimeError(f"The {label} of LossHook is not registered. Please use `registerLossHook()` first.")
+        
+        return self._loss_fn_hook[label](
+            self.response, self.target[label].response, **param
+        )
 
 class AntennaPattern:
     _history_datas:List[List[torch.Tensor]] = []
     _best_loss = float('inf')
+
+    def __new__(cls, pattern:"AntennaPattern", *args) -> "AntennaPattern":
+        if isinstance(pattern, AntennaPattern):
+            print('AntennaPattern')
+            return pattern
+        else:
+            return super(AntennaPattern, cls).__new__(cls)
     
-    def __init__(self, pattern:torch.Tensor, coordinate:Optional[Tuple[int,int, int, int]] = None):
+    @overload
+    def __init__(self, pattern:Tensor, coordinate:Optional[Tuple[int,int, int, int]] = None):
         """
         Example:
         ```
         AntennaPattern.setCoordinate((0, 25, 0, 25))
         ```
-            
         """
+    @overload
+    def __init__(self, patterns:List[Tuple[Tensor, int, int, int, int]]):
+        """
+        Args:
+            pattern: [(pattern, x1, x2, y1, y2), ...] >>> pattern is 2D
+        """
+    
+    def __init__(self, pattern:Union[Tensor, List], coordinate:Optional[Tuple[int,int, int, int]] = None):
+        
+        if isinstance(pattern, AntennaPattern):
+            return
+        
         #* The core of this class.
-        self.patterns:List[Tuple[torch.Tensor, int, int, int, int]] = [] # [(pattern, x1, x2, y1, y2), ...] >>> pattern is 2D
-        
-        
-        
-        if not hasattr(self, "_create_from_patterns"):
-            if isinstance(pattern, AntennaPattern):
-                self.patterns = pattern.patterns
-            else:
-                self.input_tensor = torch.clamp(pattern.to(config.device), min=0.0, max=1.0)
-                self.coordinate:Union[Tuple[int,int, int, int], Tuple] = coordinate or getattr(self, '_antenna_pattern_coordinate', None)
+        #? [(pattern, x1, x2, y1, y2), ...] >>> pattern is 2D
+        self.patterns:List[Tuple[Tensor, int, int, int, int]] = [] 
 
-                self._check_input()
+        if isinstance(pattern, Tensor):
+            self.input_tensor = torch.clamp(pattern.to(config.device), min=0.0, max=1.0)
+            self.coordinate:Union[Tuple[int,int, int, int], Tuple] = coordinate or getattr(self, '_antenna_pattern_coordinate', None)
 
-    @classmethod
-    def create_from_patterns(cls, patterns:List[Tuple[torch.Tensor, int, int, int, int]]):
-        setattr(cls, '_create_from_patterns', True)
-        ap = cls(None)
-        ap.patterns = patterns
-        delattr(cls, '_create_from_patterns')
-        return ap
+            self._check_input()
+
+        elif isinstance(pattern, List):
+            self.patterns = pattern
+        
+        else:
+            raise TypeError(
+                f"Expected type for pattern is Tensor or List, but got {type(pattern)}"
+            )
     
     def _check_input(self):
         _dim = self.input_dim()
@@ -306,9 +417,9 @@ class AntennaPattern:
     @classmethod
     def getRandomPattern(cls, w=40, h=40):
         patterns = torch.randn(
-            w,h, 
-            dtype=torch.float32,
-            device=config.device
+            w, h, 
+            dtype = torch.float32,
+            device = config.device
         )
         binaries = (patterns > 0.5).float()
         return cls(binaries, (0, w, 0, h))
@@ -332,7 +443,9 @@ class AntennaPattern:
 
             return antenna_pattern
         else:
-            raise TypeError("Unsupported operand type for +: 'AntennaPattern' and '{}'".format(type(other)))
+            raise TypeError(
+                "Unsupported operand type for +: 'AntennaPattern' and '{}'".format(type(other))
+            )
     
     def __len__(self):
         return len(self.patterns)
@@ -351,7 +464,7 @@ class AntennaPattern:
             return self.input_tensor.dim()   
             
     def copy(self):
-        return self.create_from_patterns(self.patterns)
+        return AntennaPattern(self.patterns)
 
     @classmethod
     def setDefaultCoordinate(cls, _coordinate:Tuple[int, int, int, int]):
@@ -389,7 +502,7 @@ class AntennaPattern:
         return base_pattern.to(config.device)[min_y:max_y, min_x:max_x]
     
 
-    def simulate(self, no_grad:bool = False, **param) -> dict[str, AntennaResponse]:
+    def simulate(self, no_grad:bool = False, **param):
         pattern = self.merge()
         result_response = {}
        
@@ -400,7 +513,9 @@ class AntennaPattern:
             else:
                 result:Dict[str, Tensor]  = self._simulator(pattern, **param)
         else:
-            raise RuntimeError("Please use `register_simulator()` to register the simulator.")
+            raise RuntimeError(
+                "Please use `register_simulator()` to register the simulator."
+            )
         
         for key, value in result.items():
             result_response[key] = AntennaResponse(value)
@@ -411,7 +526,7 @@ class AntennaPattern:
             [pattern, result_response]
         )
 
-        return result_response
+        return AntennaResponse(result_response)
 
     
     def plot(self, axes:Optional[Axes] = None, show:bool = False):

@@ -20,6 +20,7 @@ from torch import (
     set_default_device,
     stack,
     concat,
+    float64,
     set_grad_enabled, is_grad_enabled # with no_grad():...
 )
 from numpy import (
@@ -474,6 +475,34 @@ config = Config()
 
 def tensor(data: Any,dtype= None, device=None, requires_grad: bool = False):
     return _tensor(data, dtype=dtype, device=device or config.device, requires_grad=requires_grad)
+
+def cTensor(data:Any, requires_calculate:bool, *, device=None, dtype = None):
+        """
+        Creating Tensors.
+
+        Args:
+            requires_calculate (bool):
+                - If True: device=device or config.device, requires_grad=True
+                - If Fasle: device='cpu', requires_grad=False
+            device:
+                Not applicable when requires_calculate is Fasle.
+        
+        Example:
+            ```
+            cTensor([1, 2, 3], requires_calculate=True)     # tensor([1., 2., 3.], dtype=torch.float64, requires_grad=True)
+            cTensor([1, 2, 3], requires_calculate=False)    # tensor([1, 2, 3])
+            ```
+
+        """
+        t = _tensor(data)
+        if requires_calculate:
+            t = t if t.dtype.is_floating_point else t.type(dtype or float64)
+            t = t.to(device or config.device)
+            t = t.requires_grad_(True)
+        else:
+            t = t.cpu()
+        return t
+         
 
 class Figure:
     def __init__(self, name:str, nrowcol:tuple = (1, 1), save:bool = False, show:bool = False, rootdir:Optional[str] = None, size = (18, 12), **kwargs):
@@ -991,25 +1020,27 @@ class Email(SMTP):
             from_addr_pwd:tuple = ("ailab@ee.ccu.edu.tw", "bung ovhd rrcu nayg")
         ) -> None:
         """
-        Example
-        -------
-        ```
-        with Email("weiwen@alum.ccu.edu.tw") as email:
-            msg = email.getText("This is a test email sent from Python.")
-
-            msg['Subject'] = 'test測試' # 郵件標題
-            msg['From'] = 'AI Lab'  # 暱稱 或是 email
-            msg['To'] = 'weiwen@alum.ccu.edu.tw'    # 收件人 email 或 暱稱
-            msg['Cc'] = 'weiwen@alum.ccu.edu.tw, XXX@gmail.com'   # 副本收件人 email 
-            msg['Bcc'] = 'weiwen@alum.ccu.edu.tw, XXX@gmail.com'  # 密件副本收件人 email
-
-            status = email.sendMessage(msg.as_string())
+        Args:
+            to_addr (str, Sequence[str]): Target Address
             
-            if status == {}:
-                print("Email sent successfully!")
-            else:
-                print('Email send failed!')
-        ```
+        Example:
+            ```
+            with Email("weiwen@alum.ccu.edu.tw") as email:
+                msg = email.getText("This is a test email sent from Python.")
+
+                msg['Subject'] = 'test測試' # 郵件標題
+                msg['From'] = 'AI Lab'  # 暱稱 或是 email
+                msg['To'] = 'weiwen@alum.ccu.edu.tw'    # 收件人 email 或 暱稱
+                msg['Cc'] = 'weiwen@alum.ccu.edu.tw, XXX@gmail.com'   # 副本收件人 email 
+                msg['Bcc'] = 'weiwen@alum.ccu.edu.tw, XXX@gmail.com'  # 密件副本收件人 email
+
+                status = email.sendMessage(msg.as_string())
+                
+                if status == {}:
+                    print("Email sent successfully!")
+                else:
+                    print('Email send failed!')
+            ```
 
         Reference
         ---------

@@ -47,9 +47,10 @@ class SurrogateModel(ABC):
         path = Path(rootdir).joinpath(f"sm.pth")
         self.model = path.load_torch()
 
-    def __call__(self, pattern):
+    def __call__(self, pattern) -> MultiResponses:
         self.epoch += 1
-        return self.model(pattern)
+        return MultiResponses(self.model(pattern))
+    
     def __str__(self):
         return f"{self.__class__.__name__}(Model={self.model.__class__.__name__}, Optimizer={self.optimizer.__class__.__name__}, Criterion={self.criterion.__class__.__name__})"
     
@@ -83,9 +84,7 @@ class OldSM(SurrogateModel):
         input = tensor(pattern,  requires_grad=True)
         label = tensor(real_response,  requires_grad=True)
         # for epoch in range(num_epochs):
-        # while self.loss > config['HFSS.min_loss'] and epoch_2 < config['HFSS.max_epoch']:
-        while self.loss > 0.1:
-            
+        while self.loss > config['HFSS.min_loss'] and epoch_2 < config['HFSS.max_epoch']:
             self.optimizer.zero_grad()
 
             outputs_result:Tensor = self.model(input)

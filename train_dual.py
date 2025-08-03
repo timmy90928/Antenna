@@ -150,7 +150,7 @@ while epoch < config.epochs + 1:
         ###* 生成 pattern 並儲存於 buffer ###
         #? target response -> 生成模型 -> pattern
         output_element = AntennaPattern(
-            model(AntennaResponse.merge_target_responses())
+            model(AntennaResponse.target.concat())
         ) 
 
         ###* Mutation ###
@@ -160,7 +160,7 @@ while epoch < config.epochs + 1:
 
     else:
         output_element = AntennaPattern(
-            model(AntennaResponse.merge_target_responses())
+            model(AntennaResponse.target.concat())
         ) 
         TEMP['mutation'] = 0
         skip += 1
@@ -174,8 +174,8 @@ while epoch < config.epochs + 1:
     if 'patch_pattern_buf' not in TEMP or TEMP.index('patch_pattern_buf', ~output_element) is None:
         #* 未重複，進行HFSS模擬
         output_result = output_element.simulate()
-        real_loss = AntennaResponse.multi_responses_to_loss(output_result)
-        stack_output_result = stack([ n.response for n in output_result.values()])
+        real_loss = output_result.criterion()
+        stack_output_result = output_result.stack()
 
         sm_loss = smodel.train(output_element.series, stack_output_result)
         smodel.save(path_checkpoint)
@@ -219,7 +219,7 @@ while epoch < config.epochs + 1:
     #? update optimizer
     # output_element = model(AntennaResponse.merge_target_responses())
     response = smodel(output_element.series)
-    loss = AntennaResponse.multi_responses_to_loss(response)
+    loss = response.criterion()
     loss.backward()
     optimizer.step()
     model.eval()

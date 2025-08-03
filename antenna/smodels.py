@@ -4,6 +4,7 @@ from antenna.ranger import Ranger
 from antenna import *
 
 from torch.optim.optimizer import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
 from abc import ABC, abstractmethod
 
 
@@ -11,7 +12,7 @@ from abc import ABC, abstractmethod
 FloatTensor = torch.FloatTensor if str(config.device) == 'cpu' else torch.cuda.FloatTensor # type: ignore
 
 class SurrogateModel(ABC):
-    def __init__(self, model, criterion, optimizer, *, progress_callback = lambda i, n: None):
+    def __init__(self, model, criterion, optimizer:Optimizer, scheduler:Optional[LRScheduler]=None, *, progress_callback = lambda i, n: None):
         """
         Parameters
         ----------
@@ -35,17 +36,31 @@ class SurrogateModel(ABC):
         self.model: nn.Module = model
         self.criterion: nn.Module = criterion
         self.optimizer: Optimizer = optimizer
+        self.scheduler: Optional[LRScheduler] = scheduler
+        
         self.progress_callback = progress_callback
 
     def save(self, rootdir):
         # path = Path(rootdir).joinpath(f"sm_{self.epoch}.pth")
         path = Path(rootdir).joinpath(f"sm.pth")
-        torch.save(self.model, path)
+        checkpoint = {
+            'epoch': self.epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': None if not self.scheduler else self.scheduler.state_dict(),
+        }
+        torch.save(checkpoint, path)
         return path
 
     def load(self, rootdir):
         path = Path(rootdir).joinpath(f"sm.pth")
-        self.model = path.load_torch()
+        checkpoint:Dict = path.load_torch()
+        self.epoch = checkpoint['epoch']
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'] or {})
+
+        return self.epoch
 
     def __call__(self, pattern) -> MultiResponses:
         self.epoch += 1
@@ -70,10 +85,10 @@ class OldSM(SurrogateModel):
         optimizer_ge = Ranger(
             params=model_ge.parameters(), lr=config['HFSS.lr']
         )
-        self.scheduler_ge = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        scheduler_ge = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer_ge, mode="min", factor=0.5, patience=10, min_lr=1e-6
         )
-        super().__init__(model_ge, criterion_ge, optimizer_ge)
+        super().__init__(model_ge, criterion_ge, optimizer_ge, scheduler_ge)
 
     def train(self, pattern:Tensor, real_response:Tensor):
         self.model.train()
@@ -96,7 +111,7 @@ class OldSM(SurrogateModel):
 
             loss_R.backward()
             self.optimizer.step()
-            self.scheduler_ge.step(loss_R)
+            self.scheduler.step(loss_R)
 
             pilotLoss_2.append(loss_R.item())
             self.loss = loss_R.item()

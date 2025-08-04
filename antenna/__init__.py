@@ -502,7 +502,7 @@ class AntennaPattern:
         return base_pattern.to(config.device)[min_y:max_y, min_x:max_x]
     
 
-    def simulate(self, no_grad:bool = False, **param):
+    def simulate(self, no_grad:bool = True, **param):
         pattern = self.merge()
         result_response = {}
        

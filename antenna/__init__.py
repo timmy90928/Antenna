@@ -480,6 +480,11 @@ class AntennaPattern:
         
         setattr(cls, '_antenna_pattern_coordinate', _coordinate)
 
+    def binarize(self, threshold = 0.5):
+        """Binarize and become gradient-free."""
+        bi = (self.merge() >= threshold).float()
+        return AntennaPattern(bi, (0, len(bi), 0, len(bi)))
+
     def merge(self) -> torch.Tensor:
         """
         將所有 pattern 合併成一個大的底層 pattern

@@ -560,6 +560,7 @@ class Figure:
         self.show = show
         self.name = name
         self.nrowcol = nrowcol    
+        self.current_index = 1
         self.rootdir = Path(rootdir or "./")
     
     def __repr__(self):
@@ -567,7 +568,12 @@ class Figure:
 
 
     def index(self, index:int = 1):
+        """
+        :param index: Support -1
+        """
+        index = self.current_index if index == -1 else index
         ax = self.fig.add_subplot(self.nrowcol[0], self.nrowcol[1], index)
+        self.current_index += 1
         return ax
     
     def addAll(self):

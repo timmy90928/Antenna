@@ -1,5 +1,5 @@
 from antenna.utils import *
-config.device = "cpu"
+config.device = "cuda:0"
 
 import torch.nn as nn
 import numpy as np
@@ -18,7 +18,7 @@ from antenna.functions import OldSM, train_HFSS_model
 
 #%% 
 ###* Basic Config ###
-RESULT_PATH, is_connect_run = get_result_path('1752052419')
+RESULT_PATH, is_connect_run = get_result_path('')
 TEMP = Record("temp", rootdir=RESULT_PATH, load=True)
 
 path_pic = RESULT_PATH.joinpath("pic").not_exist_create()
@@ -32,7 +32,7 @@ config.epochs = 1000
 config.lr = 1e-2
 config.checkpoint_save_path = path_checkpoint
 
-config['HFSS.lr'] = 0.0005
+config['HFSS.lr'] = 0.001
 config['HFSS.min_loss'] = 0.00005
 config['HFSS.max_epoch'] = 2000
 config.response_size = (1, 361)
@@ -111,7 +111,7 @@ with Figure('Target Response', rootdir=path_pic, show=False, size=(18*2, 9*2)) a
     fig.addAll()
     
     fig[0].set_title('S11 & S22')
-    fig[0].plot(x, returnloss.detach().numpy(), color='red', marker="o")
+    fig[0].plot(x, returnloss.cpu().detach().numpy(), color='red', marker="o")
     fig[0].grid(True)
 
 #%%

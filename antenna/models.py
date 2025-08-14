@@ -4,6 +4,7 @@ from antenna import *
 import torch
 from torch.autograd.function import (
     Function,
+    FunctionCtx ,
     BackwardCFunction,
 )
 from torch.autograd import Variable
@@ -47,6 +48,82 @@ class sign_f(Function):
         grad_output[input_>1.] = 0
         grad_output[input_<-1.] = 0
         return grad_output
+
+class _GumbelSigmoid(Function):
+    @staticmethod
+    def forward(ctx:FunctionCtx, logits, tau_tensor, eps=1e-10):
+        """
+        Gumbel-Sigmoid采樣方法
+        logits: 輸入的logits（可以是實數）
+        tau: 溫度，控制離散度
+        eps: 防止除以0的小常數
+        """
+        U = torch.rand_like(logits)
+        gumbel_noise = -torch.log(-torch.log(U + eps) + eps)
+        y = torch.sigmoid((logits + gumbel_noise) / tau_tensor)
+
+        # 保存為 backward 方法提供所需的變數
+        ctx.save_for_backward(logits, y, gumbel_noise)
+        ctx.tau = tau_tensor  # 保存 tau 以便在 backward 中使用
+        return y
+
+    @staticmethod
+    def backward(ctx:BackwardCFunction, grad_output):
+        # 讀取 forward 傳遞的變數
+        logits, y, gumbel_noise = ctx.saved_tensors
+        tau = ctx.tau  # 從 ctx 中讀取 tau
+
+        # 計算 gradient
+        sigmoid_grad = y * (1 - y)  # Sigmoid 梯度
+        grad_input = grad_output * sigmoid_grad / tau  # 給 logits 的梯度
+        
+        # 計算 tau 的梯度
+        # grad_tau = (grad_output * sigmoid_grad * (logits - y)).sum() / tau**2  # 給 tau 的梯度
+        grad_tau = (grad_output * sigmoid_grad * (logits + gumbel_noise)).sum() / tau**2  # 給 tau 的梯度
+
+        return grad_input, grad_tau, None
+
+class GumbelSigmoid(Function):
+    @staticmethod
+    def forward(ctx:Function, logits, tau, eps=1e-20):
+        # tau = max(0.1, ctx.tau - 0.001 * ctx.tau) if hasattr(ctx, 'tau') else tau
+        U = torch.rand_like(logits)
+        scale = 0.1  # 降低到 0.1
+        gumbel_noise = -torch.log(-torch.log(U + eps) + eps) * scale
+        y = torch.sigmoid((logits + gumbel_noise) / tau)
+        
+        ctx.save_for_backward(logits, y, gumbel_noise, tau)
+
+        return y
+
+    @staticmethod
+    def backward(ctx:Function, grad_output):
+        logits, y, gumbel_noise, tau = ctx.saved_tensors
+        
+        ###* Sigmoid 函數的梯度 ###
+        sigmoid_grad = y * (1 - y)
+
+        ###* logits 的梯度 ###
+        grad_input = grad_output * sigmoid_grad / tau
+
+        ###* tau 的梯度 ###
+        grad_tau = -grad_output * sigmoid_grad * (logits + gumbel_noise) / (tau ** 2)
+        grad_tau = grad_tau.sum()  # 總和作為標量梯度
+        return grad_input, grad_tau, None
+    
+class BinarizeSTE(Function):
+    @staticmethod
+    def forward(ctx:FunctionCtx, input:Tensor):
+        mask = (input >= 0.5).float()
+        ctx.save_for_backward(mask)
+        return mask
+
+    @staticmethod
+    def backward(ctx:BackwardCFunction, grad_output):
+        mask, = ctx.saved_tensors
+        return grad_output * mask  # 只保留 mask 區域的梯度
+
+
 
 class HFSSNet(nn.Module):
 
@@ -153,18 +230,91 @@ class SPGEN(nn.Module):
     def __len__(self):
         return len(self.pattern_table)
     
+
+class GumbelSigmoidGEN(nn.Module):
+    """
+    Generator Model
+    """
+    def __init__(self):
+        super(GumbelSigmoidGEN,self).__init__()
+        pattern_size = AntennaPattern.size(flatten=True)
+        self.fc_patch = nn.Sequential(
+            nn.Linear(AntennaResponse.size(flatten=True), pattern_size),
+            nn.PReLU(),
+            nn.Linear(pattern_size, pattern_size*2),
+            nn.PReLU(),
+            nn.Linear(pattern_size*2, pattern_size),
+            nn.PReLU(),
+            nn.Linear(pattern_size, pattern_size),
+            BiScaleNorm(),
+        )
+        self.tau = nn.Parameter(torch.tensor(5.0, requires_grad=True))
+        self.tau_history = [] 
+
+        for m in self.fc_patch:
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 1.0)
+            if isinstance(m, nn.PReLU):
+                m.weight.data.fill_(0.25)
+
+        self.to(config.device)
+
+    def forward(self, input, *, is_trainig:bool = True):
+        """
+        輸出 Gumbel-Sigmoid 處理過的結果
+        """
+        self.logits  = torch.clamp( # 防止梯度爆炸
+            self.fc_patch(input), min=-5.0, max=5.0
+        )
+        # # 在訓練階段使用 Gumbel-Sigmoid 來保持梯度
+        # if is_trainig:
+        #     x = GumbelSigmoid.apply(x, tau)  # 訓練階段使用 Gumbel-Sigmoid 進行輸出
+        # else:
+        #     x = (x >= 0.5).float()  # 推論階段，硬性 binarize
+
+        x = GumbelSigmoid.apply(self.logits, self.tau)  # 訓練階段使用 Gumbel-Sigmoid 進行輸出
+        # self.anneal_tau()
+        self.tau_history.append(self.tau.detach().cpu().item())
+
+
+        # x = BinarizeSTE.apply(x)
+
+        return x
+    
+    def anneal_tau(self, rate=0.995, min_tau=0.1):
+        """
+        Annealing (退火)
+        
+        在訓練初期，較大的 tau 值會使得輸出更為平滑，有利於模型探索不同的解空間。
+
+        在訓練後期，較小的 tau 值會使輸出更接近離散的 0 和 1，從而幫助模型收斂到一個確定的離散解。
+        """
+        # self.tau = max(min_tau, self.tau * rate)
+        self.tau = torch.clamp(self.tau, min=0.1)
+        self.tau_recoed.append(self.tau.detach().cpu())
+
+    def binarize(self, threshold = 0.5):
+        binarized_output = (torch.sigmoid(self.logits) > threshold).float()
+        return  AntennaPattern(binarized_output)
+        return  AntennaPattern((self.x >= threshold).float())
+        
 class OldGEN(nn.Module):
     """
     Generator Model
     """
     def __init__(self):
         super(OldGEN,self).__init__()
+        patttern_size = AntennaPattern.size(flatten=True)
         self.fc_patch = nn.Sequential(
-            nn.Linear(AntennaResponse.size(flatten=True), 1024),
+            nn.Linear(AntennaResponse.size(flatten=True), patttern_size),
             nn.PReLU(),
-            nn.Linear(1024, 1024),
+            nn.Linear(patttern_size, patttern_size),
             nn.PReLU(),
-            nn.Linear(1024, AntennaPattern.size(flatten=True)),
+            nn.Linear(patttern_size, patttern_size),
+            nn.PReLU(),
+            nn.Linear(patttern_size, patttern_size),
             BiScaleNorm(),
         )
 
@@ -208,3 +358,4 @@ class GradientEstimator(nn.Module):
         output = self.conv(A)
         output = self.net(output)
         return AntennaResponse(output)
+

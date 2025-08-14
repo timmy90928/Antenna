@@ -67,8 +67,15 @@ class SurrogateModel(ABC):
         return MultiResponses(self.model(pattern))
     
     def __str__(self):
-        return f"{self.__class__.__name__}(Model={self.model.__class__.__name__}, Optimizer={self.optimizer.__class__.__name__}, Criterion={self.criterion.__class__.__name__})"
-    
+        _str = "{class_name}(Model={model}, Optimizer={optimizer}, Scheduler={scheduler}, Criterion={criterion})"
+        return _str.format(
+            class_name = self.__class__.__name__,
+            model = self.model.__class__.__name__,
+            optimizer = self.optimizer.__class__.__name__,
+            scheduler = self.scheduler.__class__.__name__,
+            criterion = self.criterion.__class__.__name__
+        )
+         
     @abstractmethod
     def train(self, pattern):
         pass

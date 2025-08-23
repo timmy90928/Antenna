@@ -217,10 +217,10 @@ class SPGEN(nn.Module):
         self.output_image = soft_output
         return self.output_image
     
-    def show(self, nrowcol:tuple):
-        with Figure("SPGEN Small Pattern", nrowcol, show=True) as fig:
+    def save(self, nrowcol:tuple, result_path):
+        with Figure("SPGEN Small Pattern", nrowcol, save=True, rootdir=result_path, size=(18, 9)) as fig:
             for n in range(len(self)):
-                ax:Axes = fig.index(n+1)
+                ax:Axes = fig.index(-1)
                 ax.set_title(f"Small Pattern {n+1}")
                 ax.imshow(self[n], cmap='viridis')
 
@@ -308,13 +308,11 @@ class OldGEN(nn.Module):
         super(OldGEN,self).__init__()
         patttern_size = AntennaPattern.size(flatten=True)
         self.fc_patch = nn.Sequential(
-            nn.Linear(AntennaResponse.size(flatten=True), patttern_size),
+            nn.Linear(AntennaResponse.size(flatten=True), 1024),
             nn.PReLU(),
-            nn.Linear(patttern_size, patttern_size),
+            nn.Linear(1024, 1024),
             nn.PReLU(),
-            nn.Linear(patttern_size, patttern_size),
-            nn.PReLU(),
-            nn.Linear(patttern_size, patttern_size),
+            nn.Linear(1024, AntennaPattern.size(flatten=True)),
             BiScaleNorm(),
         )
 

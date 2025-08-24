@@ -507,7 +507,7 @@ def cTensor(data:Any, requires_calculate:bool, *, device=None, dtype = None):
 class Figure:
     def __init__(self, name:str, nrowcol:tuple = (1, 1), save:bool = False, show:bool = False, rootdir:Optional[str] = None, size = (18, 12), **kwargs):
         """
-        :param size: Example: (18, 12), (18*2, 9*12)
+        :param size: Example: (18, 12), (18 * 2, 9 * 2)
         :param kwargs: All plt.figure() arguments
 
         ## Example

@@ -7,7 +7,7 @@ class DualPortSimulator(PatchSimulator):
         super().__init__(record_path, HFSS_sab_path, pixel_count)
 
     def __call__(self, pixel_matrix:Tensor):
-        assert getattr(self, 'num', None) != None, "Please use `start()` first"
+        super().__call__(pixel_matrix)
         pixel_row = self.pixel_count
         pixel_column = self.pixel_count
         one_num = 0
@@ -401,7 +401,7 @@ class DualPortSimulator(PatchSimulator):
                 "UseLocalCS:=", False
             ])
 
-        self.oProject.Save()
+        # self.oProject.Save()
 
         # 開始模擬
         oDesign.AnalyzeAll()

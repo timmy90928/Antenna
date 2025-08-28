@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from ...utils import Path
 from time import sleep, time
 from loguru import logger
-from torch import tensor, Tensor
+from torch import tensor, Tensor, all, logical_or
 
 class PatchSimulator(ABC):
     def __init__(self, record_path:str, HFSS_sab_path:str, pixel_count:int):
@@ -97,7 +97,9 @@ class PatchSimulator(ABC):
         :return: Execution time
         """
         assert getattr(self, 'num', None) != None, "Please use `start()` first"
-
+        self.save(
+            self.name_project.format(num=self.num)
+        )
         self.oProject.DeleteDesign(
             self.name_design.format(num=self.num)
         )
@@ -111,7 +113,20 @@ class PatchSimulator(ABC):
 
     @abstractmethod
     def __call__(self, pattern:Tensor, *args, **kwds):
-        pass
+        """
+        Custom simulation will first check num and is_binary.
+
+        # Example
+        ```
+        def __call__(self, pixel_matrix:Tensor):
+            super().__call__(pixel_matrix)
+        ```
+        """
+        is_binary = all(logical_or(
+            pattern == 0, pattern == 1
+        ))
+        assert getattr(self, 'num', None) != None, "Please use `start()` first"
+        assert is_binary, "The input must be binary"
 
     def __str__(self):
         return f"{self.__class__.__name__}(HFSS_sab_path={self.HFSS_sab_path})"

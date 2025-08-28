@@ -1,5 +1,4 @@
 from antenna.utils import *
-from script.get_local_ip import getLocalIP
 from antenna.patch import com_error
 # import numpy as np
 
@@ -9,11 +8,10 @@ import matplotlib.pyplot as plt
 from loguru import logger #? pip3 install loguru
 
 import sys
+from os.path import normpath
 from time import time
 
-# __all__ = ["AntennaPattern", "AntennaResponse", "GradientEstimator", "SPGEN"]
-
-def get_result_path(name:str = "{id}", *, set_logger:bool = True):
+def get_result_path(name:str = "{id}-{device}", *, rootdir = None, set_logger:bool = True):
     """
     Args:
         name: Folder and log name, support {id}.
@@ -29,8 +27,10 @@ def get_result_path(name:str = "{id}", *, set_logger:bool = True):
     ```
     """
     _now = int(time())
-    result_path = Path(__file__).parent.parent.joinpath(
-        "result", str(name.format(id = _now))
+    _device = get_local_ip().split('.')[-1]
+    rootdir = Path(str(normpath(rootdir))) if rootdir else  Path(__file__).parent.parent
+    result_path = rootdir.joinpath(
+        "result", str(name.format(id = _now, device = _device))
     )
     exists  = result_path.exists()
     result_path.not_exist_create()
@@ -605,7 +605,7 @@ def global_exception_handler(exc_type:type[BaseException] | None, exc_value: Bas
         tb_str = '\n'.join(traceback.format_tb(exc_traceback))
         msg = email.getText(f"{text}, 詳細錯誤訊息如下所示\n{tb_str}")
 
-        msg['Subject'] = f'Antanna Error ({getLocalIP()})' 
+        msg['Subject'] = f'Antanna Error ({get_local_ip()})' 
         msg['From'] = 'AI Lab' 
         msg['To'] = 'weiwen@alum.ccu.edu.tw' 
 

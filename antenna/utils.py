@@ -41,7 +41,8 @@ from collections import defaultdict
 from warnings import filterwarnings
 
 from pathlib import Path as _Path
-from os.path import getctime
+from os.path import getctime, exists
+import subprocess
 from sys import maxsize
 
 import numpy as np
@@ -113,10 +114,54 @@ def errorCallback(errorCallback:Optional[Callable[[str],Any]]=None, *errorCallba
                 if errorCallback:
                     errorCallback(str(e), *errorCallbackArgs, **errorCallbackKwargs)
                 else:
-                    print(e)
+                    logger.exception(e)
         return wrap
     return decorator
 
+
+def connect_network_drive(drive_letter, network_path, user="", password="", *, del_old = False):
+    """
+    Checks if a network drive is connected and attempts to connect it if not.
+    This version includes optional user and password authentication.
+
+    Args:
+        drive_letter (str): The drive letter to connect, e.g., "T:".
+        network_path (str): The UNC path of the network share, e.g., r"\\140.123.106.219\temp".
+        user (str): The username for authentication. Defaults to an empty string.
+        password (str): The password for authentication. Defaults to an empty string.
+
+    Returns:
+        bool: True if the connection is successful or already exists, False otherwise.
+    """
+    
+    if del_old:
+        try:
+            subprocess.run(
+                ['net', 'use', drive_letter, '/delete'], check=True, capture_output=True, text=True
+            )
+        except subprocess.CalledProcessError:
+            pass
+
+    # Build the net use command.
+    command_args = ['net', 'use', drive_letter, network_path, '/persistent:yes']
+    if user and password:
+        command_args.extend([password, '/user:' + user])
+
+    # Attempt to connect the network drive.
+    try:
+        logger.info(f"Attempting to connect to `{drive_letter}` ...")
+        subprocess.run(command_args, check=True, shell=True, capture_output=True, text=True)
+        logger.info(f"Network drive `{drive_letter}` successfully connected.")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        if exists(drive_letter): # Check if the drive is already connected.
+            logger.info(f"Network drive `{drive_letter}` is already connected. Skipping connection.")
+            return True
+        else:
+            logger.warning(f"Connection failed: {e.stderr}")
+        return False
+    
 class Path(type(_Path()), _Path): # type: ignore
     def __new__(cls, *args, **kwargs):
         return super().__new__(cls, *args, **kwargs)
@@ -206,165 +251,6 @@ class Path(type(_Path()), _Path): # type: ignore
         else:
             return _torch_load(self, map_location=device or config.device)
 
-_PATHLIKE = Union[str, Path]
-
-class LossFunction:
-    """
-    Loss function class.
-    
-    Attributes:
-        label: Label of the loss function.
-        loss_function: Loss function.
-
-        is_early_stopping: Whether to use early stopping.
-        early_stop: Whether to stop the training.
-        best_model: The best model.
-        
-    
-
-    """
-    _loaded:Dict[str, "LossFunction"] = {}
-    def __new__(cls, loss_function:Callable, label:str = "", *args, **kwargs):
-        label = label or loss_function.__name__
-        if cls._loaded.get(label):
-           client = cls._loaded.get(label)
-           assert isinstance(client, cls)
-        else:
-           client = super().__new__(cls)  
-           cls._loaded[label] = client
-
-        return client
-            
-    @overload
-    def __init__(self, loss_function:Callable[[Tensor, Tensor], Tensor], label:str = ""):...
-    @overload
-    def __init__(self, loss_function:Callable[[], Tensor], label:str = ""):...
-        
-    def __init__(self, loss_function:Callable, label:str = ""):
-        """
-        Loss function class.
-
-        :param loss_function: Loss function.
-        :param label: Label of the loss function.
-        
-        ## Usage::
-        ```python
-        loss_function = LossFunction(nn.MSELoss(), "MSE")
-        loss_function.enableEarlyStopping(nn.Module, patience=10, delta=0.001)
-        loss_function(output, target)
-
-        loss_function.plot()
-        loss_function.save_as_numpy("loss.npy")
-        loss_function.load_from_numpy("loss.npy")
-        ```
-
-        """
-        label = label or loss_function.__name__
-        self.label = label
-        self.loss_function = loss_function
-
-        self._loss_record = getattr(self, "_loss_record", [])
-
-        ###* EarlyStopping ###
-        self.is_early_stopping:bool =  getattr(self, "is_early_stopping", False)
-        """Whether to use early stopping."""
-        self.early_stop:bool =  getattr(self, "early_stop", False)
-        """Whether to stop the training."""
-        self.best_model = getattr(self, "best_model", None)
-        """The best model."""
-        
-    
-    def __call__(self, output:Optional[Tensor] = None, target:Optional[Tensor] = None, *, record:bool = True) -> Tensor:
-        """
-        Call the loss function.
-
-        Args:
-            output: Output of the model.
-            target: Target of the model.
-            record: Whether to record the loss.
-
-        Returns:
-            Loss value.
-        """
-        if output is None and target is None:
-            _loss:Tensor = self.loss_function()
-        else:
-            _loss:Tensor = self.loss_function(output, target)
-        
-        if self.is_early_stopping:
-            self._earlyStopping(_loss)
-
-        if record: self._loss_record.append(_loss.item())
-        return _loss
-    
-    def enableEarlyStopping(self, model:nn.Module, patience:int = 10, delta:float = 0.001, *, verbose:bool = False, trace_func=print):
-        """
-        Enable early stopping for the model.
-
-        :param patience: Number of epochs with no improvement after which training will be stopped.
-        :param delta: Minimum change in the monitored quantity to qualify as an improvement.
-        :param verbose: If True, prints a message for each validation loss improvement.
-        :param trace_func: Function used to print messages.
-        
-        """
-        self.model = getattr(self, "model", model)
-        self._patience = getattr(self, "_patience", patience)
-        self._delta = getattr(self, "_delta", delta)
-
-        assert self.model, "Model not defined!"
-        assert self._patience > 0, "Patience should be greater than 0"
-        assert self._delta > 0, "Delta should be greater than 0"
-        
-        self._counter:int = getattr(self, "_counter", 0)
-        self._best_score = getattr(self, "_best_score", None)
-        self.val_loss_min =  getattr(self, "val_loss_min", np.Inf)
-        self._verbose = getattr(self, "_verbose", verbose)
-        self._trace_func = getattr(self, "_trace_func", trace_func)
-
-        self.is_early_stopping = True
-
-    def _earlyStopping(self, val_loss:Tensor):
-        """
-        Early stops the training if validation loss doesn't improve after a given patience.
-        """
-        score = -val_loss.item()
-
-        if self._best_score is None:
-            self._best_score = score
-            self._save_early_stopping_checkpoint(val_loss)
-        elif score < self._best_score + self._delta:
-            self._counter += 1
-            if self._verbose: self._trace_func(f'EarlyStopping counter: {self._counter} out of {self._patience}')
-            if self._counter >= self._patience:
-                self.early_stop = True
-        else:
-            self._best_score = score
-            self._save_early_stopping_checkpoint(val_loss)
-            self._counter = 0
-
-    def _save_early_stopping_checkpoint(self, val_loss):
-        if self._verbose:
-            self._trace_func(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        
-        self.best_model = deepcopy(self.model.state_dict())
-        self.val_loss_min = val_loss
-
-    def save_as_numpy(self, path:_PATHLIKE):
-        np.save(str(path), self._loss_record)
-        return path
-    
-    def load_from_numpy(self, path:_PATHLIKE):
-        self._loss_record = np.load(str(path))
-        return self
-    
-    def plot(self, axes:Optional[Axes] = None, show:bool = False):
-        ax:Axes = plt.axes(axes) # type: ignore
-        ax.set_title(f'Loss Function ({self.loss_function.__name__})')
-        ax.plot(self._loss_record)
-        # ax.legend()
-        if show: plt.show()
-        return ax
-    
 def plot(x,file_name:Optional[str] = None) -> None:
         """
         Plot the weight matrix on a 3D graph
@@ -1073,6 +959,19 @@ class Email(SMTP):
     
     def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, tb) -> None:
         self.quit()
+
+from socket import socket, AF_INET, SOCK_DGRAM
+def get_local_ip():
+    s = socket(AF_INET, SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))  # Google DNS
+        ip = s.getsockname()[0]
+    except Exception as e:
+        ip = "127.0.0.1"
+        logger.error(e)
+    finally:
+        s.close()
+    return ip
 
 if __name__ == "__main__":
     # print(Path("./checkpoint").manage_file_count("*.pth", keep_latest=1))

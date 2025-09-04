@@ -15,9 +15,9 @@ from .web import Email
 
 from torch import nn
 from torch import Tensor
-from .torch import tensor
-from .torch import cTensor
-from .torch import *
+from .torch_utils import tensor
+from .torch_utils import cTensor
+from .torch_utils import *
 
 from typing import (
     Tuple, List, Dict, Deque, # Can use the built-in.

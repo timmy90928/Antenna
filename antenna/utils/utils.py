@@ -2,14 +2,11 @@ from typing import (
     Tuple, List, Dict, Deque, # Can use the built-in.
     TypeVar, cast, Callable, Any, Optional, overload, Union, Sequence, Literal
 )
-from typing_extensions import Self
 from loguru import logger
 import traceback
 import torch
 from torch import (
     __version__,
-    nn,
-    tensor as _tensor,
     Tensor,
     cuda,
     manual_seed as _manual_seed,
@@ -18,9 +15,7 @@ from torch import (
     device as _torch_device,
     # get_default_device,
     set_default_device,
-    stack,
-    concat,
-    float64,
+
     set_grad_enabled, is_grad_enabled # with no_grad():...
 )
 from numpy import (
@@ -42,7 +37,7 @@ from warnings import filterwarnings
 
 from pathlib import Path as _Path
 from os.path import getctime, exists
-import subprocess
+
 from sys import maxsize
 
 import numpy as np
@@ -56,11 +51,6 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
 from matplotlib.axes._axes import Axes  # type: ignore
 
-#* Email
-from smtplib import SMTP
-from email.mime.text import MIMEText
-
-
 FIG_CONFIG = {
     "format": 'png',
     "bbox_inches": "tight",
@@ -70,30 +60,6 @@ FIG_CONFIG = {
     "facecolor": "none", # white
     "edgecolor": "none",
 }
-
-try: 
-    from torch.utils.tensorboard import SummaryWriter # type:ignore pip install tensorboard
-    def getTensorBoardWriter(log_dir:str = './runs') -> SummaryWriter:
-        """
-
-        ## Usage
-        ```bash
-        tensorboard --logdir=runs
-        ```
-
-        ## Example
-        ```
-        tbwriter = getTensorBoardWriter()
-        for n_iter in range(100):
-            tbwriter.add_scalar('Loss/train', np.random.random(), n_iter)
-            tbwriter.add_scalar('Loss/test', np.random.random(), n_iter)
-            tbwriter.add_scalar('Accuracy/train', np.random.random(), n_iter)
-            tbwriter.add_scalar('Accuracy/test', np.random.random(), n_iter)
-        ```
-        """
-        return SummaryWriter(log_dir)
-except ModuleNotFoundError:
-    pass
 
 def errorCallback(errorCallback:Optional[Callable[[str],Any]]=None, *errorCallbackArgs, **errorCallbackKwargs):
     """
@@ -119,48 +85,7 @@ def errorCallback(errorCallback:Optional[Callable[[str],Any]]=None, *errorCallba
     return decorator
 
 
-def connect_network_drive(drive_letter, network_path, user="", password="", *, del_old = False):
-    """
-    Checks if a network drive is connected and attempts to connect it if not.
-    This version includes optional user and password authentication.
 
-    Args:
-        drive_letter (str): The drive letter to connect, e.g., "T:".
-        network_path (str): The UNC path of the network share, e.g., r"\\140.123.106.219\temp".
-        user (str): The username for authentication. Defaults to an empty string.
-        password (str): The password for authentication. Defaults to an empty string.
-
-    Returns:
-        bool: True if the connection is successful or already exists, False otherwise.
-    """
-    
-    if del_old:
-        try:
-            subprocess.run(
-                ['net', 'use', drive_letter, '/delete'], check=True, capture_output=True, text=True
-            )
-        except subprocess.CalledProcessError:
-            pass
-
-    # Build the net use command.
-    command_args = ['net', 'use', drive_letter, network_path, '/persistent:yes']
-    if user and password:
-        command_args.extend([password, '/user:' + user])
-
-    # Attempt to connect the network drive.
-    try:
-        logger.info(f"Attempting to connect to `{drive_letter}` ...")
-        subprocess.run(command_args, check=True, shell=True, capture_output=True, text=True)
-        logger.info(f"Network drive `{drive_letter}` successfully connected.")
-        return True
-
-    except subprocess.CalledProcessError as e:
-        if exists(drive_letter): # Check if the drive is already connected.
-            logger.info(f"Network drive `{drive_letter}` is already connected. Skipping connection.")
-            return True
-        else:
-            logger.warning(f"Connection failed: {e.stderr}")
-        return False
     
 class Path(type(_Path()), _Path): # type: ignore
     def __new__(cls, *args, **kwargs):
@@ -359,36 +284,7 @@ class Config(dict):
 
 config = Config()
 
-def tensor(data: Any,dtype= None, device=None, requires_grad: bool = False):
-    return _tensor(data, dtype=dtype, device=device or config.device, requires_grad=requires_grad)
 
-def cTensor(data:Any, requires_calculate:bool, *, device=None, dtype = None):
-        """
-        Creating Tensors.
-
-        Args:
-            requires_calculate (bool):
-                - If True: device=device or config.device, requires_grad=True
-                - If Fasle: device='cpu', requires_grad=False
-            device:
-                Not applicable when requires_calculate is Fasle.
-        
-        Example:
-            ```
-            cTensor([1, 2, 3], requires_calculate=True)     # tensor([1., 2., 3.], dtype=torch.float64, requires_grad=True)
-            cTensor([1, 2, 3], requires_calculate=False)    # tensor([1, 2, 3])
-            ```
-
-        """
-        t = _tensor(data)
-        if requires_calculate:
-            t = t if t.dtype.is_floating_point else t.type(dtype or float64)
-            t = t.to(device or config.device)
-            t = t.requires_grad_(True)
-        else:
-            t = t.cpu()
-        return t
-         
 
 class Figure:
     def __init__(self, name:str, nrowcol:tuple = (1, 1), save:bool = False, show:bool = False, rootdir:Optional[str] = None, size = (18, 12), **kwargs):
@@ -907,71 +803,9 @@ class json:
         else:
             return False
 
-class Email(SMTP):
-   
-    def __init__(
-            self, 
-            to_addr:Union[str, Sequence[str]],
-            from_addr_pwd:tuple = ("ailab@ee.ccu.edu.tw", "bung ovhd rrcu nayg")
-        ) -> None:
-        """
-        Args:
-            to_addr (str, Sequence[str]): Target Address
-            
-        Example:
-            ```
-            with Email("weiwen@alum.ccu.edu.tw") as email:
-                msg = email.getText("This is a test email sent from Python.")
 
-                msg['Subject'] = 'test測試' # 郵件標題
-                msg['From'] = 'AI Lab'  # 暱稱 或是 email
-                msg['To'] = 'weiwen@alum.ccu.edu.tw'    # 收件人 email 或 暱稱
-                msg['Cc'] = 'weiwen@alum.ccu.edu.tw, XXX@gmail.com'   # 副本收件人 email 
-                msg['Bcc'] = 'weiwen@alum.ccu.edu.tw, XXX@gmail.com'  # 密件副本收件人 email
 
-                status = email.sendMessage(msg.as_string())
-                
-                if status == {}:
-                    print("Email sent successfully!")
-                else:
-                    print('Email send failed!')
-            ```
 
-        Reference
-        ---------
-        https://steam.oxxostudio.tw/category/python/example/gmail.html
-        """
-        super().__init__("smtp.gmail.com", 587)
-        self.starttls()
-        self.login(from_addr_pwd[0], from_addr_pwd[1])
-        
-        self.to_addr = to_addr
-        self.from_addr = from_addr_pwd[0]
-    
-    def getText(self, message):
-        return MIMEText(message)
-                        
-    def sendMessage(self, message):
-        return self.sendmail(self.from_addr, self.to_addr, message)
-
-    def __enter__(self) -> Self:
-        return self
-    
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, tb) -> None:
-        self.quit()
-
-from socket import socket, AF_INET, SOCK_DGRAM
-def get_local_ip():
-    s = socket(AF_INET, SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))  # Google DNS
-        ip = s.getsockname()[0]
-    except Exception as e:
-        ip = "127.0.0.1"
-        logger.error(e)
-    finally:
-        s.close()
-    return ip
 
 if __name__ == "__main__":
     # print(Path("./checkpoint").manage_file_count("*.pth", keep_latest=1))
